@@ -196,6 +196,9 @@ async function recheckAndAssignPartnerToBooking(fastify, slotMap, bookingData, b
         statusCode: 200,
         status: "Dead",
         message: "Due to high demand and unavailability of Beauticians, we can not place your booking.",
+        // statusCode: 200,
+        // status: "200",
+        // message: "Placed",
       };
     }
 

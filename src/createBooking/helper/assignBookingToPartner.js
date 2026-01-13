@@ -1,4 +1,4 @@
-// import * as geofire from 'geofire-common';
+import * as geofire from 'geofire-common';
 import { calculateBookedSlots } from '../../shared/utils/calculateBookedSlots.js';
 import { sendNotification } from '../../shared/utils/sendNotification.js';
 // import logger from '../../shared/utils/logger.js';
@@ -128,10 +128,10 @@ export async function assignBookingToPartner(
         };
 
     } catch (error) {
-        // logger.error({ error, orderId: bookingData.orderId }, "Error in assignBookingToPartner");
+        console.error("Error in assignBookingToPartner:", error.message, error.stack);
         return {
             status: "error",
-            message: "Error in assignBookingToPartner"
+            message: "Error in assignBookingToPartner: " + error.message
         };
     }
 }
