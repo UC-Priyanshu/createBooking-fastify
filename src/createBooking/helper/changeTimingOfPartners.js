@@ -1,10 +1,12 @@
 import { calculateBookedSlots } from '../../shared/utils/calculateBookedSlots.js';
 import logger from '../../shared/utils/logger.js';
+import { firestore } from "../../plugin/firebase.js";
 
-export async function changeTimingOfPartners(fastify, bookingData, recheckAvailabilityOfPartner, bookingDate, bookingId) {
+
+export async function changeTimingOfPartners( bookingData, recheckAvailabilityOfPartner, bookingDate, bookingId) {
     try {
         // Access Firebase through fastify decorator
-        const { firestore } = fastify.firebase;
+        // const { firestore } = fastify.firebase;
         
         const partnerId = recheckAvailabilityOfPartner.partner.id;
         const timingId = bookingDate.substring(0, 4) + bookingDate.substring(5, 7) + bookingDate.substring(8, 10);

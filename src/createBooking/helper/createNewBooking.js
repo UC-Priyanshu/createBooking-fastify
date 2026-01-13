@@ -37,7 +37,7 @@ export default async function createNewBooking(fastify, bookingData, preferredPa
       if (finalBookingStatus.statusCode === 200 && finalBookingStatus.status === "Placed") {
 
         // Update Wallet (Critical Operation - keep awaited)
-        await updateWallet(fastify, bookingData).catch(() => { });
+        // await updateWallet(fastify, bookingData).catch(() => { });
 
         return reply.code(200).send({
           statusCode: 200,
@@ -119,7 +119,7 @@ async function recheckAndAssignPartnerToBooking(fastify, slotMap, bookingData, b
 
     // Step 2: Recheck Availability
     const recheckResponse = await recheckAvailabilityOfPartner(
-      fastify,
+      // fastify,
       slotMap["slot no."],
       prioritizedPartners,
       bookingDate,
@@ -132,7 +132,7 @@ async function recheckAndAssignPartnerToBooking(fastify, slotMap, bookingData, b
 
       // A. Assign Partner
       const bookingStatus = await assignBookingToPartner(
-        fastify,
+        // fastify,
         bookingData,
         preferredPartner,
         recheckResponse,
@@ -144,7 +144,7 @@ async function recheckAndAssignPartnerToBooking(fastify, slotMap, bookingData, b
 
         // B. Change Timings
         const changeTimingsResponse = await changeTimingOfPartners(
-          fastify,
+          // fastify,
           bookingData,
           recheckResponse,
           bookingDate,

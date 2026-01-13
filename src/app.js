@@ -8,8 +8,8 @@ export async function buildApp(options = {}) {
 
     const app = Fastify({
         logger: true,
-        connectionTimeout: 5000,
-        keepAliveTimeout: 5000,
+        connectionTimeout: 120000,
+        keepAliveTimeout: 120000,
         requestIdLogLabel: 'reqId',
         disableRequestLogging: process.env.NODE_ENV === 'production',
     });

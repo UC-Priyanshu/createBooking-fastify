@@ -2,9 +2,11 @@
 import { calculateBookedSlots } from '../../shared/utils/calculateBookedSlots.js';
 import { sendNotification } from '../../shared/utils/sendNotification.js';
 // import logger from '../../shared/utils/logger.js';
+import { firestore, admin, FieldValue  } from "../../plugin/firebase.js";
+
 
 export async function assignBookingToPartner(
-    fastify, // Add fastify parameter to access Firebase
+    // fastify, // Add fastify parameter to access Firebase
     bookingData,
     preferredPartner,
     recheckPartnersAvailability,
@@ -13,7 +15,7 @@ export async function assignBookingToPartner(
 ) {
     try {
         // Access Firebase through fastify decorator
-        const { firestore, FieldValue, admin } = fastify.firebase;
+        // const { firestore, FieldValue, admin } = fastify.firebase;
         const GeoPoint = admin.firestore.GeoPoint;
 
         const currentPartner = recheckPartnersAvailability.partner;

@@ -14,6 +14,9 @@ async function recheckAvailabilityOfPartner(
         let statusOfAvailability = false;
         let availablePartnerwithHighestPriority = null;
         let partnerMissedLeadReasonListOfMap = [];
+        
+        console.log(`[RECHECK] Starting to check ${prioritizedPartners.length} partners for slot ${slotNo}`);
+        
         for (const partner of prioritizedPartners) {
             // logger.info({line: 17, partnerId: partner.id});
 
@@ -105,10 +108,12 @@ async function recheckAvailabilityOfPartner(
                     continue;
                 }
             } else {
-                logger.info({line: 60, msg: "partner timing doc does not exist"});
+                // logger.info({line: 60, msg: "partner timing doc does not exist"});
                 statusOfAvailability = true;
                 availablePartnerwithHighestPriority = partner;
             }
+            
+            // If we found an available partner, return immediately
             if (statusOfAvailability) {
                 return {
                     partner: availablePartnerwithHighestPriority,
@@ -116,21 +121,7 @@ async function recheckAvailabilityOfPartner(
                     partnerMissedLeadReasonListOfMap
                 };
             }
-            if (rescheduleData && rescheduleData.status === false) {
-                return {
-                    availablityStatus: false,
-                    message:
-                        "Due to high demand and unavailability of Beuticians, we can not place your booking. Please try again later",
-                    partnerMissedLeadReasonListOfMap
-                };
-            }
-            bookingData.status = "dead";
-            return {
-                availablityStatus: false,
-                message:
-                    "Due to high demand and unavailability of Beuticians, we can not place your booking. Please try again later!",
-                partnerMissedLeadReasonListOfMap
-            };
+            // Otherwise, continue checking the next partner
         }
         return {
             statusCode: 400,
