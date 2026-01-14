@@ -1,145 +1,130 @@
-import { calculateBookedSlots } from '../../shared/utils/calculateBookedSlots.js';
-import logger from '../../shared/utils/logger.js';
-import { firestore } from "../../plugin/firebase.js";
+export async function changeTimingOfPartners(
+  fastify,
+  bookingData,
+  recheckAvailabilityOfPartner,
+  bookingDate,
+  bookingId
+) {
+  const { firestore } = fastify.firebase;
 
+  const partnerId = recheckAvailabilityOfPartner.partner.id;
+  const timingId = bookingDate.replace(/-/g, ""); // faster than substrings
 
-export async function changeTimingOfPartners( bookingData, recheckAvailabilityOfPartner, bookingDate, bookingId) {
-    try {
-        // Access Firebase through fastify decorator
-        // const { firestore } = fastify.firebase;
-        
-        const partnerId = recheckAvailabilityOfPartner.partner.id;
-        const timingId = bookingDate.substring(0, 4) + bookingDate.substring(5, 7) + bookingDate.substring(8, 10);
-        
-        // Calculate slots (Business Logic)
-        const listOfBookedSlots = calculateBookedSlots(bookingData.bookingsminutes, bookingData.slotnumber);
+  /* ---------- SLOT CALCULATION (FAST) ---------- */
+  const slotStart = bookingData.slotnumber;
+  const slotCount = Math.ceil(bookingData.bookingsminutes / 30);
+  const listOfBookedSlots = Array.from(
+    { length: slotCount },
+    (_, i) => slotStart + i
+  );
 
-        // ---------------------------------------------------------
-        // OPTIMIZATION 1: Parallel DB Reads (Fetch both at once)
-        // ---------------------------------------------------------
-        const timingRef = firestore.collection("partner").doc(partnerId).collection("timings").doc(timingId);
-        const partnerDocRef = firestore.collection("partner").doc(partnerId);
+  /* ---------- FIRESTORE REFS ---------- */
+  const timingRef = firestore
+    .collection("partner")
+    .doc(partnerId)
+    .collection("timings")
+    .doc(timingId);
 
-        const [timingSnapShot, partnerDocSnap] = await Promise.all([
-            timingRef.get(),
-            partnerDocRef.get()
-        ]);
+  const partnerRef = firestore.collection("partner").doc(partnerId);
 
-        // Get Non-Working Slots (Fallback logic)
-        const partnerNonWorkingSlots = partnerDocSnap.exists ? (partnerDocSnap.data().nonWorkingSlots || []) : [];
+  try {
+    /* ---------- PARALLEL READ ---------- */
+    const [timingSnap, partnerSnap] = await Promise.all([
+      timingRef.get(),
+      partnerRef.get(),
+    ]);
 
-        // ---------------------------------------------------------
-        // LOGIC PATH 1: Update Existing Timing Doc
-        // ---------------------------------------------------------
-        if (timingSnapShot.exists) {
-            const data = timingSnapShot.data();
-            const available = data.available || [];
-            const booked = data.booked || [];
-            const nonWorkingSlots = data.nonWorkingSlots || partnerNonWorkingSlots;
-            const bookings = data.bookings || [];
+    const partnerNonWorkingSlots = partnerSnap.exists
+      ? partnerSnap.data().nonWorkingSlots || []
+      : [];
 
-            // Update Arrays: Remove from available, add to booked
-            // Using Set for O(1) lookup speed if lists are large (optional but good practice)
-            const availableSet = new Set(available);
-            
-            listOfBookedSlots.forEach(slot => {
-                if (availableSet.has(slot)) {
-                    availableSet.delete(slot);
-                }
-                // Check duplicate before pushing
-                if (!booked.includes(slot)) {
-                    booked.push(slot);
-                }
-            });
+    /* =========================================================
+       EXISTING TIMING DOCUMENT
+       ========================================================= */
+    if (timingSnap.exists) {
+      const data = timingSnap.data();
 
-            // Reconstruct Array from Set
-            const updatedAvailable = Array.from(availableSet);
-            
-            // Add Booking Log
-            bookings.push({ [bookingId]: listOfBookedSlots });
+      const availableSet = new Set(data.available || []);
+      const bookedSet = new Set(data.booked || []);
+      const bookings = data.bookings || [];
 
-            // Sort Arrays (Business Requirement)
-            updatedAvailable.sort((a, b) => a - b);
-            booked.sort((a, b) => a - b);
+      for (const slot of listOfBookedSlots) {
+        availableSet.delete(slot);
+        bookedSet.add(slot);
+      }
 
-            // Commit Update
-            await timingRef.update({
-                available: updatedAvailable,
-                booked: booked,
-                nonWorkingSlots: nonWorkingSlots,
-                bookings: bookings
-            });
+      bookings.push({ [bookingId]: listOfBookedSlots });
 
-            logger.info({ partnerId, bookingId }, "Partner timing updated successfully");
+      await timingRef.update({
+        available: [...availableSet].sort((a, b) => a - b),
+        booked: [...bookedSet].sort((a, b) => a - b),
+        nonWorkingSlots: data.nonWorkingSlots || partnerNonWorkingSlots,
+        bookings,
+      });
 
-            return {
-                statusCode: 200,
-                status: "success",
-                message: "Booking updated successfully"
-            };
-        } 
-        
-        // ---------------------------------------------------------
-        // LOGIC PATH 2: Create New Timing Doc
-        // ---------------------------------------------------------
-        else {
-            const bookings = [{ [bookingId]: listOfBookedSlots }];
-            const availableSlots = getAvailableSlots(listOfBookedSlots);
-
-            const timingRefDoc = {
-                available: availableSlots,
-                booked: listOfBookedSlots,
-                dateTime: getCurrentDateFormatted(),
-                nonWorkingSlots: partnerNonWorkingSlots,
-                leave: [],
-                bookings: bookings
-            };
-
-            // Using Batch for atomic creation (though single set is also atomic)
-            const batch = firestore.batch();
-            batch.set(timingRef, timingRefDoc);
-            await batch.commit();
-
-            // logger.info({ partnerId, bookingId }, "New timing document created");
-
-            return {
-                statusCode: 200,
-                status: "success",
-                message: "New timing document created and booking updated successfully"
-            };
-        }
-
-    } catch (error) {
-        // Silent failure for speed
-        return {
-            statusCode: 400,
-            status: "error",
-            message: "Error in changeTimingOfPartners"
-        };
+      return {
+        statusCode: 200,
+        status: "success",
+        message: "Booking updated successfully",
+      };
     }
-}
 
-// ---------------------------------------------------------
-// UTILS (Optimized)
-// ---------------------------------------------------------
-
-function getAvailableSlots(bookedSlots) {
+    /* =========================================================
+       NEW TIMING DOCUMENT
+       ========================================================= */
+    const bookedSet = new Set(listOfBookedSlots);
     const availableSlots = [];
-    const bookedSet = new Set(bookedSlots); // O(1) Lookup
-    
+
     for (let i = 0; i <= 23; i++) {
-        if (!bookedSet.has(i)) {
-            availableSlots.push(i);
-        }
+      if (!bookedSet.has(i)) availableSlots.push(i);
     }
-    return availableSlots;
+
+    await timingRef.set({
+      available: availableSlots,
+      booked: listOfBookedSlots,
+      dateTime: getCurrentDateFormatted(),
+      nonWorkingSlots: partnerNonWorkingSlots,
+      leave: [],
+      bookings: [{ [bookingId]: listOfBookedSlots }],
+    });
+
+    return {
+      statusCode: 200,
+      status: "success",
+      message: "New timing document created and booking updated successfully",
+    };
+  } catch {
+    return {
+      statusCode: 400,
+      status: "error",
+      message: "Error in changeTimingOfPartners",
+    };
+  }
 }
 
-// Native JS Date Formatter (Replaces Moment.js for speed)
+/* =========================================================
+   UTILITIES (FAST)
+   ========================================================= */
+
 function getCurrentDateFormatted() {
-    const now = new Date();
-    // Native Intl format matching: "13 January 2026 at 12.52.00 UTC+05:30"
-    const datePart = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' }).format(now);
-    const timePart = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' }).format(now).replace(/:/g, '.');
-    return `${datePart} at ${timePart} [UTC]+05:30`;
+  const now = new Date();
+
+  const date = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  }).format(now);
+
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Kolkata",
+  })
+    .format(now)
+    .replace(/:/g, ".");
+
+  return `${date} at ${time} [UTC]+05:30`;
 }

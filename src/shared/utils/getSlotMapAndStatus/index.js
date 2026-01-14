@@ -1,124 +1,122 @@
-// import logger from "../logger.js";
+const SLOT_API_URL =
+  "https://asia-south1-urbanculture5.cloudfunctions.net/availabilityOfSlots";
 
+/* ---------------- MAIN FUNCTION ---------------- */
 async function getSlotMapAndStatus(
-    bodydetails,
-    preferredPartner,
-    bookingDate,
-    rescheduleData
+  bodydetails,
+  preferredPartner,
+  bookingDate,
+  rescheduleData
 ) {
-    // logger.info({
-    //     line: 7,
-    //     bodydetails,
-    //     preferredPartner,
-    //     bookingDate,
-    //     rescheduleData,
-    // });
-    try {
-        // Call Slot API to prepare The SlotMap Object Data.
-        const preferredPartnerId =
-            preferredPartner === "none" ? "" : preferredPartner.trim();
+  const preferredPartnerId =
+    preferredPartner === "none" ? "" : preferredPartner.trim();
 
-        const bodyFoSlotAPI = {
-            newBookingCoordinates: {
-                latitude: bodydetails.latitude,
-                longitude: bodydetails.longitude,
-            },
-            priceToPay: bodydetails.priceToPay,
-            pickedDate: [`${bookingDate}`],
-            clientId: `${bodydetails.clientid}`,
-            rescheduling: {
-                status: rescheduleData ? rescheduleData.status : false,
-                bookingId: rescheduleData ? rescheduleData.bookingId : "",
-                role: "admin",
-            },
-            serviceMinutes: bodydetails.bookingsminutes,
-            preferredPartner: preferredPartnerId,
-        };
-        const slotAPIData = await fetchSlotAPIData(bodyFoSlotAPI);
-        // logger.info({line: 33, slotAPIData});
+  const bodyForSlotAPI = {
+    newBookingCoordinates: {
+      latitude: bodydetails.latitude,
+      longitude: bodydetails.longitude,
+    },
+    priceToPay: bodydetails.priceToPay,
+    pickedDate: [bookingDate],
+    clientId: bodydetails.clientid,
+    rescheduling: {
+      status: Boolean(rescheduleData?.status),
+      bookingId: rescheduleData?.bookingId ?? "",
+      role: "admin",
+    },
+    serviceMinutes: bodydetails.bookingsminutes,
+    preferredPartner: preferredPartnerId,
+  };
 
-        if (slotAPIData.error) {
-            return {
-                statusCode: 401,
-                error: slotAPIData.error || "Error occured in fetching slot data.",
-            };
-        }
+  const slotAPIData = await fetchSlotAPIData(bodyForSlotAPI);
 
-        if (slotAPIData.datesMap.length !== 0) {
-            // logger.info({line: 45, rescheduleData});
-            const slotMap = prepareSlotMap(
-                slotAPIData,
-                bookingDate,
-                rescheduleData && rescheduleData.status
-                    ? rescheduleData.rescheduleSlotNumber
-                    : bodydetails.slotnumber
-            );
+  if (!slotAPIData || slotAPIData.error) {
+    return {
+      statusCode: 401,
+      error: slotAPIData?.error ?? "Error fetching slot data",
+    };
+  }
 
-            // logger.info({line: 55, slotMap});
-            // logger.info({line: 56, availablePartners: (slotMap?.availablePartners || "undefined")});
-            return {
-                statusCode: 200,
-                slotMap: slotMap,
-                bookingstatus: "pending",
-            };
-        }
+  if (!Array.isArray(slotAPIData.datesMap) || slotAPIData.datesMap.length === 0) {
+    return {
+      statusCode: 201,
+      message:
+        preferredPartnerId !== ""
+          ? "Requested partner is unavailable at the moment."
+          : "Due to high demand, booking cannot be placed.",
+      bookingstatus: "dead(NOR)",
+    };
+  }
 
-        if (slotAPIData.datesMap.length === 0 && preferredPartnerId !== "") {
-            return {
-                statusCode: 201,
-                message:
-                    "Requested partner is unavailable at the moment. Please select another partner.",
-                bookingstatus: "dead(NOR)",
-            };
-        }
-        return {
-            statusCode: 201,
-            message:
-                "Due to high demand, your booking can not be placed at the moment. Please try again later.",
-            bookingstatus: "dead(NOR)",
-        };
-    } catch (error) {
-        // logger.info({line: 75, error});
-        return {
-            statusCode: 500,
-            error: error.message || "Internal Server Error.",
-        };
-    }
+  const slotMap = prepareSlotMap(
+    slotAPIData,
+    bookingDate,
+    rescheduleData?.status
+      ? rescheduleData.rescheduleSlotNumber
+      : bodydetails.slotnumber
+  );
+
+  if (!slotMap) {
+    return {
+      statusCode: 201,
+      message: "Requested slot is unavailable.",
+      bookingstatus: "dead(NOR)",
+    };
+  }
+
+  return {
+    statusCode: 200,
+    slotMap,
+    bookingstatus: "pending",
+  };
 }
 
-async function fetchSlotAPIData(bodyFoSlotAPI) {
-    // logger.info({line: 89, bodyFoSlotAPI});
-    const response = await fetch(
-        "https://asia-south1-urbanculture5.cloudfunctions.net/availabilityOfSlots",
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(bodyFoSlotAPI),
-        }
-    );
+/* ---------------- FETCH WITH TIMEOUT ---------------- */
+async function fetchSlotAPIData(body) {
+//   const controller = new AbortController();
+//   const timeout = setTimeout(() => controller.abort(), 3500);
+
+  try {
+    const response = await fetch(SLOT_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    //   signal: controller.signal,
+    });
+
     if (!response.ok) {
-        return {
-            error: response.statusText,
-            statusText: response.status,
-            status: 401,
-        };
+      return {
+        error: response.statusText,
+        status: response.status,
+      };
     }
-    const data = await response.json();
-    return data;
+
+    return await response.json();
+  } catch (err) {
+    return {
+      error:
+        err.name === "AbortError"
+          ? "Slot service timeout"
+          : err.message,
+    };
+  } 
+//   finally {
+//     // clearTimeout(timeout);
+//   }
 }
 
+/* ---------------- FAST SLOT MAP PREPARATION ---------------- */
 function prepareSlotMap(slotAPIData, bookingDate, slotNumber) {
-    // logger.info({line: 104, bookingDate, slotNumber});
-    const choosedDateMap = slotAPIData.datesMap.filter((dateMap) => {
-        return dateMap.dateId === bookingDate.replace(/-/g, "");
-    });
+  const dateId = bookingDate.replace(/-/g, "");
 
-    const slotMap = choosedDateMap[0].slots.filter((slot) => {
-        return slot["slot no."] === slotNumber;
-    });
-    return slotMap[0];
+  const dateMap = slotAPIData.datesMap.find(
+    (d) => d.dateId === dateId
+  );
+  if (!dateMap) return null;
+
+  return dateMap.slots.find(
+    (slot) => slot["slot no."] === slotNumber
+  ) ?? null;
 }
 
 export default getSlotMapAndStatus;

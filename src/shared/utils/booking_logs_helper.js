@@ -1,6 +1,4 @@
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { firestore } from "../../plugin/firebase.js";
-// import logger from "./logger.js";
+
 
 function toDDMMYYYY(d) {
     const dd = String(d.getDate()).padStart(2, '0');
@@ -21,11 +19,11 @@ function convertYYYYMMDDToDate(yyyymmdd) {
     return new Date(year, month, day);
 }
 
-async function handleLogs(partnerId, bookingDate, orderId, bookingId, amount, status, ratedByPartner = null, ratedByClient = null, reviews = null) {
+async function handleLogs(fastify, partnerId, bookingDate, orderId, bookingId, amount, status, ratedByPartner = null, ratedByClient = null, reviews = null) {
     const logPrefix = `[HandleLogs][Order:${orderId}][Booking:${bookingId}]`;
 
     try {
-        const docRef = firestore
+        const docRef = fastify.firebase.firestore
             .collection('partner')
             .doc(partnerId)
             .collection('performance')

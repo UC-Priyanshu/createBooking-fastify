@@ -1,18 +1,27 @@
 import { initMissedLeadsFunction } from '../../shared/utils/missed_lead/missed_leads_helper_for_reschedule_booking.js';
 import { handleLogs } from '../../shared/utils/booking_logs_helper.js';
-// import logger from '../../shared/utils/logger.js';
 
 export async function processReschedulingBooking(fastify, recheckPartnersAvailability, bookingData, bookingDate, rescheduleData) {
     // Access Firebase through fastify decorator
     const { firestore, FieldValue, admin } = fastify.firebase;
     const Timestamp = admin.firestore.Timestamp;
-    
+
     // Optimization: Pre-calculate string operations once
     const oldBookingDate = bookingData.bookingdateIsoString.substring(0, 10).replace(/-/g, "");
-    
+    const timingId = bookingDate.substring(0, 4) + bookingDate.substring(5, 7) + bookingDate.substring(8, 10);
+
+    // OPTIMIZATION: Fetch leave documents BEFORE transaction to reduce transaction time
+    const oldPartnerId = bookingData.assignedpartnerid;
+    const newPartnerId = recheckPartnersAvailability.partner.id;
+
+    const [oldPartnerLeaveDoc, newPartnerLeaveDoc] = await Promise.all([
+        getPartnerLeaveDocForDate(oldPartnerId, oldBookingDate),
+        getPartnerLeaveDocForDate(newPartnerId, timingId)
+    ]);
+
     try {
         const transactionResult = await firestore.runTransaction(async (transaction) => {
-            
+
             // 1. BACKUP: Create copy in RescheduledBookings
             const rescheduledBookingRef = firestore.collection("RescheduledBookings").doc(bookingData.orderId);
             transaction.set(rescheduledBookingRef, bookingData);
@@ -26,25 +35,28 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
 
             // 3. ASSIGN: New Partner Logic
             const previousListOfBookedSlots = bookingData.listofbookedslots;
-            
+
             const { newPartnerRef, listOfBookedSlots } = await assignBookingToNewPartner(
-                transaction, 
-                recheckPartnersAvailability, 
-                bookingData, 
-                bookingDate, 
+                transaction,
+                recheckPartnersAvailability,
+                bookingData,
+                bookingDate,
                 rescheduleData
             );
 
             // 4. TIMING UPDATE: The Heavy Logic (Optimized)
             await changeTimingOfPartners(
-                transaction, 
-                bookingDate, 
-                oldPartnerRef, 
-                newPartnerRef, 
-                previousListOfBookedSlots, 
-                bookingData.listofbookedslots, 
-                oldBookingDate, 
-                bookingData.bookingid
+                transaction,
+                bookingDate,
+                oldPartnerRef,
+                newPartnerRef,
+                previousListOfBookedSlots,
+                bookingData.listofbookedslots,
+                oldBookingDate,
+                bookingData.bookingid,
+                oldPartnerLeaveDoc,
+                newPartnerLeaveDoc,
+                timingId
             );
 
             // 5. SIDE EFFECTS (Post-Transaction Triggers)
@@ -61,30 +73,32 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
         if (transactionResult.isMissedLead) {
             // Run async (don't await if you want faster API response, or await if strict)
             initMissedLeadsFunction(
-                transactionResult.oldPartnerId, 
-                transactionResult.newPartnerId, 
-                oldBookingDate, 
-                bookingDate, 
-                firestore.collection('partner').doc(transactionResult.oldPartnerId), 
-                firestore.collection('partner').doc(transactionResult.newPartnerId), 
-                bookingData.bookingid, 
-                bookingData.orderId, 
-                bookingData.address, 
-                bookingData.name, 
-                bookingData.priceToPay, 
+                fastify,
+                transactionResult.oldPartnerId,
+                transactionResult.newPartnerId,
+                oldBookingDate,
+                bookingDate,
+                firestore.collection('partner').doc(transactionResult.oldPartnerId),
+                firestore.collection('partner').doc(transactionResult.newPartnerId),
+                bookingData.bookingid,
+                bookingData.orderId,
+                bookingData.address,
+                bookingData.name,
+                bookingData.priceToPay,
                 bookingData.listofbookedslots
-            ).catch(err => {});
+            ).catch(err => { });
             // ).catch(err => logger.error({err}, 'Missed Lead Error'));
         }
 
         handleLogs(
-            transactionResult.oldPartnerId, 
-            oldBookingDate, 
-            bookingData.orderId, 
-            bookingData.bookingid, 
-            bookingData.priceToPay, 
+            fastify,
+            transactionResult.oldPartnerId,
+            oldBookingDate,
+            bookingData.orderId,
+            bookingData.bookingid,
+            bookingData.priceToPay,
             "rescheduled"
-        ).catch(err => {});
+        ).catch(err => { });
         // ).catch(err => logger.error({err}, 'Handle Logs Error'));
 
         return {
@@ -111,7 +125,7 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
 async function makeCreditsRefundForOldPartner(transaction, oldPartnerRef, bookingData) {
     const oldPartnerCreditInfoRef = oldPartnerRef.collection("creditinfo").doc("info");
     const oldPartnerDoc = await transaction.get(oldPartnerCreditInfoRef);
-    
+
     const oldPartnerCredits = oldPartnerDoc.exists ? oldPartnerDoc.data().availablecredits : 0;
     const newOldPartnerCredits = oldPartnerCredits + bookingData.credits;
 
@@ -154,7 +168,13 @@ async function assignBookingToNewPartner(transaction, recheckPartnersAvailabilit
         };
     }
 
-    const listOfBookedSlots = calculateBookedSlots(bookingData.bookingsminutes, rescheduleData.rescheduleSlotNumber);
+    // const listOfBookedSlots = calculateBookedSlots(bookingData.bookingsminutes, rescheduleData.rescheduleSlotNumber);
+    const numberOfSlots = Math.ceil(bookingData.bookingsminutes / 30);
+    const listOfBookedSlots = [];
+    for (let i = 0; i < numberOfSlots; i++) {
+        listOfBookedSlots.push(rescheduleData.rescheduleSlotNumber + i);
+    }
+
 
     // Update Booking Data Object directly
     Object.assign(bookingData, {
@@ -195,8 +215,7 @@ async function assignBookingToNewPartner(transaction, recheckPartnersAvailabilit
  * HEAVY LIFTING: Logic Consolidated to remove 200 lines of duplicates
  * ------------------------------------------------------------------
  */
-async function changeTimingOfPartners(transaction, bookingDate, oldPartnerRef, newPartnerRef, previousSlots, newSlots, oldBookingDate, bookingId) {
-    const timingId = bookingDate.substring(0, 4) + bookingDate.substring(5, 7) + bookingDate.substring(8, 10);
+async function changeTimingOfPartners(transaction, bookingDate, oldPartnerRef, newPartnerRef, previousSlots, newSlots, oldBookingDate, bookingId, oldPartnerLeaveDoc, newPartnerLeaveDoc, timingId) {
 
     // 1. Parallel Reads: Fetch all needed docs at once to save time
     const [oldPartnerDoc, newPartnerDoc] = await Promise.all([
@@ -226,15 +245,16 @@ async function changeTimingOfPartners(transaction, bookingDate, oldPartnerRef, n
     // We only do this if oldTiming exists
     if (oldTimingSnap.exists) {
         await processSlotUpdate(
-            transaction, 
-            oldTimingRef, 
-            oldTimingSnap, 
-            oldPartnerRef.id, 
+            transaction,
+            oldTimingRef,
+            oldTimingSnap,
+            oldPartnerRef.id,
             oldBookingDate, // timingId for old
             oldPartnerDoc.data().nonWorkingSlots || [],
-            previousSlots, 
-            bookingId, 
-            'REVERT' // Action: Remove from booked, add to available/leave
+            previousSlots,
+            bookingId,
+            'REVERT', // Action: Remove from booked, add to available/leave
+            oldPartnerLeaveDoc
         );
     }
 
@@ -244,7 +264,7 @@ async function changeTimingOfPartners(transaction, bookingDate, oldPartnerRef, n
     // will be locked. Since we need the *updated* state if they are same, 
     // simply passing the logic sequentially handles it, but typically we would merge operations.
     // For safety and "Same Logic" adherence:
-    
+
     if (newTimingSnap.exists) {
         // If it's the same doc, we must technically read the 'pending write' state, 
         // but Firestore transactions don't expose that easily. 
@@ -254,17 +274,18 @@ async function changeTimingOfPartners(transaction, bookingDate, oldPartnerRef, n
         // For simplicity in this structure, we run processSlotUpdate again. 
         // Note: In a real transaction, you'd calculate final state in memory then write once.
         // But adhering to your structure:
-        
+
         await processSlotUpdate(
-            transaction, 
-            newTimingRef, 
+            transaction,
+            newTimingRef,
             newTimingSnap, // Note: This is STALE if it's the same doc. 
-            newPartnerRef.id, 
-            timingId, 
+            newPartnerRef.id,
+            timingId,
             newPartnerDoc.data().nonWorkingSlots || [],
-            newSlots, 
-            bookingId, 
-            'BOOK' // Action: Add to booked, remove from available
+            newSlots,
+            bookingId,
+            'BOOK', // Action: Add to booked, remove from available
+            newPartnerLeaveDoc
         );
     } else {
         // New Timing Doc doesn't exist - Create it
@@ -282,8 +303,9 @@ async function changeTimingOfPartners(transaction, bookingDate, oldPartnerRef, n
 
 /**
  * Universal Helper to updating slots (Replaces the repeated if-else blocks)
+ * OPTIMIZED: Now accepts pre-fetched leaveDoc to avoid DB query inside transaction
  */
-async function processSlotUpdate(transaction, docRef, docSnap, partnerId, timingId, partnerNonWorkingSlots, slotsToProcess, bookingId, action) {
+async function processSlotUpdate(transaction, docRef, docSnap, partnerId, timingId, partnerNonWorkingSlots, slotsToProcess, bookingId, action, leaveDoc) {
     const data = docSnap.data();
     let available = data.available || [];
     let booked = data.booked || [];
@@ -293,16 +315,13 @@ async function processSlotUpdate(transaction, docRef, docSnap, partnerId, timing
 
     // 1. Handle "Revert" (Old Partner/Date)
     if (action === 'REVERT') {
-        // Check Leave Status (Async check outside transaction strictly, but kept here for logic match)
+        // Check Leave Status using pre-fetched doc
         let isLeaveApproved = false;
         let leaveSlotsForDay = [];
-        
-        if (leave.length > 0) {
-            const leaveDoc = await getPartnerLeaveDocForDate(partnerId, timingId);
-            if (leaveDoc && leaveDoc.exists && leaveDoc.data().status === 'approved') {
-                isLeaveApproved = true;
-                leaveSlotsForDay = leaveDoc.data().slotsPerDay[timingId] || [];
-            }
+
+        if (leave.length > 0 && leaveDoc && leaveDoc.exists && leaveDoc.data().status === 'approved') {
+            isLeaveApproved = true;
+            leaveSlotsForDay = leaveDoc.data().slotsPerDay[timingId] || [];
         }
 
         // Logic: Remove from 'booked', add to 'leave' or 'available'
@@ -327,7 +346,7 @@ async function processSlotUpdate(transaction, docRef, docSnap, partnerId, timing
         slotsToProcess.forEach(slot => {
             const idx = available.indexOf(slot);
             if (idx !== -1) available.splice(idx, 1);
-            
+
             // Avoid duplicates
             if (!booked.includes(slot)) booked.push(slot);
         });
@@ -358,21 +377,6 @@ async function processSlotUpdate(transaction, docRef, docSnap, partnerId, timing
 // ==========================================
 // UTILS
 // ==========================================
-
-function calculateBookedSlots(duration, startSlot) {
-    // Basic implementation based on your code's usage
-    const slots = [];
-    const slotsCount = Math.ceil(duration / 60); // Assuming duration is minutes, slots are hourly?
-    // Note: Adjust this logic based on your actual calculateBookedSlots util if it's complex
-    // For now assuming simple 1 hour = 1 slot logic or you import it.
-    // If you import it, remove this function.
-    for(let i=0; i< (duration/30); i++) { // Assuming 30 min slots? Or just reuse your util
-         slots.push(startSlot + i);
-    }
-    return slots; 
-}
-// Note: You imported 'calculateBookedSlots' in previous files but not here. 
-// If it's a util, import it. If simple logic, keep it here.
 
 function getAvailableSlots(bookedSlots) {
     const availableSlots = [];

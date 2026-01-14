@@ -1,29 +1,28 @@
-import { firestore } from "../../plugin/firebase.js";
-import {FieldValue} from "firebase-admin/firestore";
-// import logger from "./logger.js";
-function increaseAPIHitCount() {
-    return firestore
-        .collection("Configurations")
-        .doc("DistanceAPI")
-        .update({
-            API_Hit_Count: FieldValue.increment(1),
-        });
-}
 
-function changeAPIStatus(status) {
-    return firestore.collection("Configurations").doc("DistanceAPI").update({
-        status,
-    });
-}
+// function increaseAPIHitCount() {
+//     return firestore
+//         .collection("Configurations")
+//         .doc("DistanceAPI")
+//         .update({
+//             API_Hit_Count: FieldValue.increment(1),
+//         });
+// }
+
+// function changeAPIStatus(status) {
+//     return firestore.collection("Configurations").doc("DistanceAPI").update({
+//         status,
+//     });
+// }
 
 
-function generateRoundedCoordinates(latitude, longitude) {
-    const roundedLatitude = parseFloat(latitude.toFixed(4));
-    const roundedLongitude = parseFloat(longitude.toFixed(4));
-    return {roundedLatitude, roundedLongitude};
-}
+// function generateRoundedCoordinates(latitude, longitude) {
+//     const roundedLatitude = parseFloat(latitude.toFixed(4));
+//     const roundedLongitude = parseFloat(longitude.toFixed(4));
+//     return {roundedLatitude, roundedLongitude};
+// }
 
-async function checkAPIStatus() {
+async function checkAPIStatus(fastify) {
+    const { firestore } = fastify.firebase;
     return await firestore
         .collection("Configurations")
         .doc("DistanceAPI")
@@ -53,11 +52,9 @@ async function checkAPIStatus() {
         });
 }
 
-function generateSpecialID(sourceGeoHash, destinationGeoHash) {
-    return sourceGeoHash + destinationGeoHash;
-
-
-}
+// function generateSpecialID(sourceGeoHash, destinationGeoHash) {
+//     return sourceGeoHash + destinationGeoHash;
+// }
 
 async function increaseMAPBOXAPIHitCount() {
     await firestore
@@ -77,11 +74,11 @@ async function increaseMAPBOXAPIHitCountForCreateBooking() {
         });
 }
 
-function changeMAPBOXAPIStatus(status) {
-    return firestore.collection("Configurations").doc("DistanceAPI").update({
-        MAPBOX_status: status,
-    });
-}
+// function changeMAPBOXAPIStatus(status) {
+//     return firestore.collection("Configurations").doc("DistanceAPI").update({
+//         MAPBOX_status: status,
+//     });
+// }
 
 
 function getMAPBOXAPIToken(MAPBOX_Authorization) {
@@ -97,13 +94,13 @@ function getMAPBOXAPIToken(MAPBOX_Authorization) {
 }
 
 export {
-    increaseAPIHitCount,
-    changeAPIStatus,
-    generateRoundedCoordinates,
+    // increaseAPIHitCount,
+    // changeAPIStatus,
+    // generateRoundedCoordinates,
     checkAPIStatus,
-    generateSpecialID,
+    // generateSpecialID,
     increaseMAPBOXAPIHitCount,
-    changeMAPBOXAPIStatus,
+    // changeMAPBOXAPIStatus,
     getMAPBOXAPIToken,
     increaseMAPBOXAPIHitCountForCreateBooking
 };

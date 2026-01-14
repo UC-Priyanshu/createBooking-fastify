@@ -1,7 +1,6 @@
-import { firestore } from "../../../plugin/firebase.js";
-// import logger from "../../utils/logger.js";
 
-async function fetchBookingDetailsfromDB(bookingId) {
+async function fetchBookingDetailsfromDB(fastify, bookingId) {
+    const { firestore } = fastify.firebase;
     try {
         const bookingDocRef = firestore.collection("BOOKINGS").doc(bookingId);
 
@@ -17,7 +16,6 @@ async function fetchBookingDetailsfromDB(bookingId) {
             message: "No such Booking document found",
         };
     } catch (error) {
-        // logger.info({line: 19, error});
         return new Error("Error in fetchBookingDetailsfromDB: ", error);
     }
 }

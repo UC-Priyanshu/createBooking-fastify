@@ -3,7 +3,7 @@ import { createBookingHandler } from './create_booking.controller.js';
 
 export async function createBookingRoutes(fastify, options) {
 
-    fastify.post('/createBooking-fastify', {
+    fastify.post('/create-booking-fastify', {
         schema: createBookingSchema,
         handler: createBookingHandler,
     });

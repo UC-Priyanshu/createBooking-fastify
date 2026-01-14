@@ -1,8 +1,5 @@
 import crypto from 'crypto';
 
-// Keep logger import present but commented, per request.
-// import logger from "./logger.js";
-
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
 
 function sha256Hash(value) {
@@ -46,19 +43,19 @@ function toUsersData(users) {
 }
 
 // Keep signature compatible with existing calls: (fastify, audienceId, users)
-async function addUsersToAudience(_fastify, audienceId, users) {
-	const usersData = toUsersData(users);
-	return withAudience(audienceId, (audience) =>
-		audience.createUser([], {
-			payload: {
-				schema: ['EMAIL', 'FN', 'LN', 'PHONE', 'CT', 'ST', 'COUNTRY', 'GEN', 'ZIP', 'MADID'],
-				data: usersData,
-			},
-		})
-	);
-}
+// async function addUsersToAudience(_fastify, audienceId, users) {
+// 	const usersData = toUsersData(users);
+// 	return withAudience(audienceId, (audience) =>
+// 		audience.createUser([], {
+// 			payload: {
+// 				schema: ['EMAIL', 'FN', 'LN', 'PHONE', 'CT', 'ST', 'COUNTRY', 'GEN', 'ZIP', 'MADID'],
+// 				data: usersData,
+// 			},
+// 		})
+// 	);
+// }
 
-async function removeUsersFromAudience(_fastify, audienceId, users) {
+async function removeUsersFromAudience( audienceId, users) {
 	const usersData = toUsersData(users);
 	return withAudience(audienceId, (audience) =>
 		audience.deleteUsers({
@@ -70,16 +67,20 @@ async function removeUsersFromAudience(_fastify, audienceId, users) {
 	);
 }
 
-async function replaceUsersInAudience(_fastify, audienceId, users) {
-	const usersData = toUsersData(users);
-	return withAudience(audienceId, (audience) =>
-		audience.createUsersReplace([], {
-			payload: {
-				schema: ['EMAIL', 'FN', 'LN', 'PHONE', 'CT', 'ST', 'COUNTRY', 'GEN', 'ZIP', 'MADID'],
-				data: usersData,
-			},
-		})
-	);
-}
+// async function replaceUsersInAudience(_fastify, audienceId, users) {
+// 	const usersData = toUsersData(users);
+// 	return withAudience(audienceId, (audience) =>
+// 		audience.createUsersReplace([], {
+// 			payload: {
+// 				schema: ['EMAIL', 'FN', 'LN', 'PHONE', 'CT', 'ST', 'COUNTRY', 'GEN', 'ZIP', 'MADID'],
+// 				data: usersData,
+// 			},
+// 		})
+// 	);
+// }
 
-export { addUsersToAudience, removeUsersFromAudience, replaceUsersInAudience };
+export { 
+	// addUsersToAudience, 
+	removeUsersFromAudience, 
+	// replaceUsersInAudience 
+};

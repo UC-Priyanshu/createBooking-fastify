@@ -1,6 +1,3 @@
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { firestore } from "../../../plugin/firebase.js";
-// import logger from "../../utils/logger.js";
 function convertYYYYMMDDToDate(yyyymmdd) {
     if (typeof yyyymmdd !== 'string' || yyyymmdd.length !== 8) {
         throw new Error("Invalid input: Expected a string in 'yyyymmdd' format");
@@ -13,20 +10,16 @@ function convertYYYYMMDDToDate(yyyymmdd) {
     return new Date(year, month, day);
 }
 
-const formatMonth = (date) => {
-    const jsDate = date instanceof Date ? date : date.toDate?.() || new Date(date);
-    return jsDate.toISOString().substr(0, 7).replace(/-/g, '');
-};
+// const formatMonth = (date) => {
+//     const jsDate = date instanceof Date ? date : date.toDate?.() || new Date(date);
+//     return jsDate.toISOString().substr(0, 7).replace(/-/g, '');
+// };
 
 
-async function initMissedLeadsFunction(oldPartnerId, newPartnerId, oldBookingDate, newBookingDate, oldPartnerDoc, newPartnerDoc, bookingId, orderId, clientAddress, clientName, priceToPay, bookedSlots) {
+async function initMissedLeadsFunction(fastify, oldPartnerId, newPartnerId, oldBookingDate, newBookingDate, oldPartnerDoc, newPartnerDoc, bookingId, orderId, clientAddress, clientName, priceToPay, bookedSlots) {
     const logPrefix = `[MissedLeads][Order:${orderId}][Booking:${bookingId}]`;
 
     try {
-        // logger.info(`${logPrefix} Starting transaction - OldPartner:${oldPartnerId}, NewPartner:${newPartnerId}`);
-        // logger.info(`${logPrefix} OldBookingDate:${oldBookingDate}, NewBookingDate:${newBookingDate}`);
-
-        // --- normalize dates ---
         const _old = convertYYYYMMDDToDate(oldBookingDate);
         const _new = convertYYYYMMDDToDate(newBookingDate.replace(/-/g, ''));
 

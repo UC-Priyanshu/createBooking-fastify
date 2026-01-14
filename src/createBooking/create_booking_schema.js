@@ -14,8 +14,6 @@ const bodySchema = {
     },
     bookingData: {
       type: 'object',
-      // We only validate these if it's a NEW booking. 
-      // Fastify schema is flexible, but complex logic is better in code for this mixed use-case.
       properties: {
         bookingsminutes: { type: 'integer' },
         priceToPay: { type: 'number' },

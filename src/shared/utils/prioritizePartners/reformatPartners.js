@@ -1,111 +1,148 @@
-import { admin, firestore, GeoFirestore, FieldValue } from "../../../plugin/firebase.js";
-import axios from "axios";
-// import logger from "../logger.js";
-import { checkAPIStatus, getMAPBOXAPIToken, increaseMAPBOXAPIHitCount, increaseMAPBOXAPIHitCountForCreateBooking } from "../helpers.js";
+import {
+  checkAPIStatus,
+  getMAPBOXAPIToken,
+  increaseMAPBOXAPIHitCount,
+  increaseMAPBOXAPIHitCountForCreateBooking,
+} from "../helpers.js";
 
-// Function to calculate distance using mapboxAPI
+const MAPBOX_BASE_URL =
+  "https://api.mapbox.com/directions/v5/mapbox/driving";
+
+let MAPBOX_TOKEN_CACHE = null;
+
+/* ---------------- MAPBOX DISTANCE (FAST) ---------------- */
 async function calculateDistance(
-    partnerLatitude,
-    partnerLongitude,
-    coordinates
+  fastify,
+  partnerLat,
+  partnerLng,
+  { latitude, longitude }
 ) {
-    try {
-        const status = await checkAPIStatus();
-
-        const mapboxAccessToken = getMAPBOXAPIToken(status?.MAPBOX_Authorization);
-        if (!mapboxAccessToken) {
-            const error = new Error("Mapbox Access Token not found");
-            // logger.info('Configuration error', {error: error.message});
-            throw error;
-        }
-        const {latitude, longitude} = coordinates;
-        const locationCoordinates = `${longitude},${latitude}`;
-
-        const partnerCoordinates = `${partnerLongitude},${partnerLatitude}`;
-
-        const mapboxApiUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${partnerCoordinates};${locationCoordinates}`;
-        const response = await axios.get(mapboxApiUrl, {
-            params: {
-                access_token: mapboxAccessToken,
-                overview: false,
-            },
-        });
-        if (response.data.routes.length === 0) {
-            const error = new Error("No route found in Mapbox API response");
-            // logger.info('Validation error', {
-            //     error: error.message,
-            //     responseData: response.data
-            // });
-            throw error;
-        }
-        await increaseMAPBOXAPIHitCount();
-        await increaseMAPBOXAPIHitCountForCreateBooking();
-        return response.data.routes[0].distance;
-    } catch (error) {
-        // logger.info({line: 27, error});
+  if (!MAPBOX_TOKEN_CACHE) {
+    const status = await checkAPIStatus(fastify);
+    MAPBOX_TOKEN_CACHE = getMAPBOXAPIToken(status?.MAPBOX_Authorization);
+    if (!MAPBOX_TOKEN_CACHE) {
+      throw new Error("Mapbox token missing");
     }
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000); 
+
+  try {
+    const url = `${MAPBOX_BASE_URL}/${partnerLng},${partnerLat};${longitude},${latitude}?access_token=${MAPBOX_TOKEN_CACHE}&overview=false`;
+
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) throw new Error("Mapbox error");
+
+    const data = await res.json();
+    if (!data.routes?.length) return Infinity;
+
+    // fire-and-forget counters
+    setImmediate(() => {
+      increaseMAPBOXAPIHitCount().catch(() => {});
+      increaseMAPBOXAPIHitCountForCreateBooking().catch(() => {});
+    });
+
+    return data.routes[0].distance;
+  } catch {
+    return Infinity; // treat unreachable as far away
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
-// Function to fetch number of bookings from firestore database
-async function fetchNumberOfBookings(partner, bookingDate) {
-    var nextDatefromBooking = new Date(bookingDate);
-    nextDatefromBooking.setDate(nextDatefromBooking.getDate() + 1); // Adds one day
+/* ---------------- BOOKINGS COUNT (FAST) ---------------- */
+async function fetchNumberOfBookings(fastify, partnerId, bookingDate) {
+  const firestore = fastify.firebase.firestore;
 
-    // Fetch number of bookings from firestore database
-    const query = firestore
-        .collection("BOOKINGS")
-        .where("assignedpartnerid", "==", partner.id)
-        .where("bookingdateIsoString", ">=", new Date(bookingDate).toISOString())
-        .where("bookingdateIsoString", "<", nextDatefromBooking.toISOString())
-        .where("status", "in", [
-            "pending",
-            "confirmed",
-            "tripstarted",
-            "jobstarted",
-            "jobfinished",
-            "rated",
-        ]);
-    const snapshot = await query.get();
-    return snapshot.docs.length;
+  const start = new Date(bookingDate);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+
+  // If Firestore aggregation is available (MUCH faster)
+  if (firestore.collection("BOOKINGS").count) {
+    const snap = await firestore
+      .collection("BOOKINGS")
+      .where("assignedpartnerid", "==", partnerId)
+      .where("bookingdateIsoString", ">=", start.toISOString())
+      .where("bookingdateIsoString", "<", end.toISOString())
+      .where("status", "in", [
+        "pending",
+        "confirmed",
+        "tripstarted",
+        "jobstarted",
+        "jobfinished",
+        "rated",
+      ])
+      .count()
+      .get();
+
+    return snap.data().count;
+  }
+
+  // fallback
+  const snap = await firestore
+    .collection("BOOKINGS")
+    .where("assignedpartnerid", "==", partnerId)
+    .where("bookingdateIsoString", ">=", start.toISOString())
+    .where("bookingdateIsoString", "<", end.toISOString())
+    .where("status", "in", [
+      "pending",
+      "confirmed",
+      "tripstarted",
+      "jobstarted",
+      "jobfinished",
+      "rated",
+    ])
+    .get();
+
+  return snap.size;
 }
 
-// Function to create object for each partner with required key-value pairs
-async function reformatPartners(partnersMap, coordinates, bookingDate) {
-    const partnerObjects = [];
+/* ---------------- MAIN FUNCTION ---------------- */
+async function reformatPartners(fastify, partnersMap, coordinates, bookingDate) {
+  const firestore = fastify.firebase.firestore;
 
-    for (const partner of partnersMap) {
-        const partnerCollection = firestore.collection("partner");
-        const partnerDocRef = partnerCollection.doc(partner.id);
-        const docSnapshot = await partnerDocRef.get();
-        // logger.info({ line: 61, docSnapshot: docSnapshot.data() });
+  // 🔥 Parallel everything
+  const tasks = partnersMap.map(async ({ id }) => {
+    const partnerRef = firestore.collection("partner").doc(id);
 
-        if (docSnapshot.exists) {
-            const {latitude, longitude, rank, avgrating, cancellationRate} = docSnapshot.data();
-            const distance = await calculateDistance(
-                latitude,
-                longitude,
-                coordinates
-            );
-            const numberOfBookings = await fetchNumberOfBookings(
-                partner,
-                bookingDate
-            );
+    const [doc, bookings, distance] = await Promise.all([
+      partnerRef.get(),
+      fetchNumberOfBookings(fastify, id, bookingDate),
+      calculateDistance(fastify, null, null, coordinates), // lazy inject below
+    ]);
 
-            const partnerObject = {
-                id: partner.id,
-                distance,
-                rank,
-                numberOfBookings,
-                avgrating,
-                cancellationRate: cancellationRate ?? 0
-            };
+    if (!doc.exists) return null;
 
-            partnerObjects.push(partnerObject);
-        } else {}
-            // logger.info("No such Document Exists of Partner");
-    }
+    const {
+      latitude,
+      longitude,
+      rank,
+      avgrating,
+      cancellationRate = 0,
+    } = doc.data();
 
-    return partnerObjects;
+    // now compute distance with actual coords
+    const finalDistance = await calculateDistance(
+      fastify,
+      latitude,
+      longitude,
+      coordinates
+    );
+
+    return {
+      id,
+      distance: finalDistance,
+      rank,
+      numberOfBookings: bookings,
+      avgrating,
+      cancellationRate,
+    };
+  });
+
+  const results = await Promise.all(tasks);
+  return results.filter(Boolean);
 }
 
 export default reformatPartners;

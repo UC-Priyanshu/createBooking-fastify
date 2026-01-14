@@ -7,31 +7,33 @@ const envSchema = {
     properties: {
         PORT: {
             type: 'integer',
-            default: 3000
+            default: 3000,
         },
         HOST: {
             type: 'string',
-            default: '0.0.0.0'
+            default: '0.0.0.0',
         },
         NODE_ENV: {
             type: 'string',
-            default: 'development'
-        }
-    }
+            default: 'development',
+        },
+    },
 };
 
-async function configPlugin(app, options) {
+function configPlugin(app) {
     const envOptions = {
         confKey: 'config',
         schema: envSchema,
-        dotenv: {
-            path: '.env',
-            encoding: 'utf-8',
-            debug: false
-        }
+        dotenv:
+            process.env.NODE_ENV === 'development'
+                ? {
+                    path: '.env',
+                    encoding: 'utf-8',
+                }
+                : false,
     };
 
-    await app.register(fastifyEnv, envOptions);
+    app.register(fastifyEnv, envOptions);
 }
 
 export default fp(configPlugin);

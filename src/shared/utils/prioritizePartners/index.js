@@ -1,100 +1,92 @@
 import reformatPartners from "./reformatPartners.js";
-// import logger from "../logger.js";
-//  Functions to normalize each parameter to a scale of 0 to 1.
 
-const weights = {
-    distance: 0.0, // 0% weight
-    rank: 0.1, // 10% weight
-    numberOfBookings: 0.40, // 40% weight
-    averageRating: 0.20, // 20% weight
-    cancellationRate: -0.30 // negative weight
-};
+/* ---------------- CONSTANTS (NO REALLOCATION) ---------------- */
+const WEIGHTS = Object.freeze({
+  distance: 0.0,
+  rank: 0.1,
+  numberOfBookings: 0.4,
+  averageRating: 0.2,
+  cancellationRate: -0.3,
+});
 
-function normalizeDistance(distance, maxDistance) {
-    return 1 - distance / maxDistance;
+const MAX_VALUES = Object.freeze({
+  distance: 10000,
+  rank: 10000,
+  numberOfBookings: 3,
+  averageRating: 5,
+});
+
+/* ---------------- CORE SCORING (INLINE, FAST) ---------------- */
+function scoreBeautician(b, max) {
+  const distanceScore = 1 - b.distance / max.distance;
+  const rankScore = b.rank / max.rank;
+  const bookingScore = 1 - b.numberOfBookings / max.numberOfBookings;
+  const ratingScore = b.avgrating / max.averageRating;
+  const cancellationScore = b.cancellationRate / 100;
+
+  return (
+    distanceScore * WEIGHTS.distance +
+    rankScore * WEIGHTS.rank +
+    bookingScore * WEIGHTS.numberOfBookings +
+    ratingScore * WEIGHTS.averageRating +
+    cancellationScore * WEIGHTS.cancellationRate
+  );
 }
 
-function normalizeRank(rank, maxRank) {
-    return rank / maxRank;
-}
-
-function normalizeNumberOfBookings(bookings, maxBookings) {
-    return 1 - bookings / maxBookings;
-}
-
-function normalizeAverageRating(rating) {
-    return rating / 5;
-}
-
-function normalizeCancellationRate(cancellationRate) {
-    return cancellationRate / 100;
-}
-
-function calculateScore(beautician, maxValues) {
-    const normalizedDistance = normalizeDistance(
-        beautician.distance,
-        maxValues.distance
+/* ---------------- PRIORITIZATION ---------------- */
+function prioritizeBeauticians(
+  beauticians,
+  rescheduleData,
+  preferredPartner
+) {
+  // Compute score in single pass
+  for (let i = 0; i < beauticians.length; i++) {
+    beauticians[i].score = scoreBeautician(
+      beauticians[i],
+      MAX_VALUES
     );
-    const normalizedRank = normalizeRank(beautician.rank, maxValues.rank);
-    const normalizedBookings = normalizeNumberOfBookings(
-        beautician.numberOfBookings,
-        maxValues.numberOfBookings
+  }
+
+  // Fast path: reschedule with preferred partner
+  if (rescheduleData?.status === true && preferredPartner !== "none") {
+    const index = beauticians.findIndex(
+      (b) => b.id === preferredPartner
     );
-    const normalizedRating = normalizeAverageRating(beautician.avgrating);
-    const normalizedCancellationRate = normalizeCancellationRate(beautician.cancellationRate);
 
-    // logger.info({line: 32, beautician, normalizedDistance, normalizedRank, normalizedBookings, normalizedRating});
-    return (
-        (normalizedDistance * weights.distance) +
-        (normalizedRank * weights.rank) +
-        (normalizedBookings * weights.numberOfBookings) +
-        (normalizedRating * weights.averageRating)
-        + (normalizedCancellationRate * weights.cancellationRate)
-    );
-}
-
-function prioritizeBeauticians(beauticians, maxValues, rescheduleData, preferredPartner) {
-    beauticians.forEach((beautician) => {
-        beautician.score = calculateScore(beautician, maxValues);
-        // logger.info({line: 41, beautician});
-    });
-
-    if (rescheduleData && rescheduleData.status === true && preferredPartner !== "none") {
-        const rescheduledPartner = beauticians.find(beautician => beautician.id === preferredPartner);
-        const rescheduledPartnerIndex = beauticians.indexOf(rescheduledPartner);
-        beauticians.splice(rescheduledPartnerIndex, 1);
-        beauticians.unshift(rescheduledPartner);
-        return beauticians;
+    if (index > 0) {
+      const [partner] = beauticians.splice(index, 1);
+      beauticians.unshift(partner);
     }
 
-    // logger.info({line: 51, beauticians});
-    return beauticians.sort((a, b) => b.score - a.score);
+    return beauticians;
+  }
+
+  // Sort by score (descending)
+  return beauticians.sort((a, b) => b.score - a.score);
 }
 
-async function prioritizePartners(partnersMap, coordinates, bookingDate, rescheduleData, preferredPartner) {
-    // Assign the weights of the the parameters
-    const reFormattedPartnersMap = await reformatPartners(
-        partnersMap,
-        coordinates,
-        bookingDate
-    );
-    // logger.info({line: 62, reFormattedPartnersMap});
+/* ---------------- ENTRY POINT ---------------- */
+async function prioritizePartners(
+  fastify,
+  partnersMap,
+  coordinates,
+  bookingDate,
+  rescheduleData,
+  preferredPartner
+) {
+  // Await only once (no extra async layers)
+  const partners = await reformatPartners(
+    fastify,
+    partnersMap,
+    coordinates,
+    bookingDate
+  );
 
-    const maxValues = {
-        distance: 10000, // maximum possible distance
-        rank: 10000, // maximum possible rank
-        numberOfBookings: 3, // maximum possible number of bookings
-        averageRating: 5, // maximum possible rating
-    };
-
-    const prioritizedBeauticians = prioritizeBeauticians(
-        reFormattedPartnersMap,
-        maxValues, rescheduleData, preferredPartner
-    );
-
-    // logger.info({line: 76, prioritizedBeauticians});
-
-    return prioritizedBeauticians;
+  return prioritizeBeauticians(
+    partners,
+    rescheduleData,
+    preferredPartner
+  );
 }
 
 export default prioritizePartners;

@@ -11,6 +11,7 @@ import { sendNotification } from "../../shared/utils/sendNotification.js";
  * Logic remains exactly the same, but optimized for speed and Fastify.
  */
 export default async function rescheduleBooking(
+  fastify, // Add fastify parameter to access Firebase
   preferredPartner,
   bookingDate,
   rescheduleData,
@@ -22,7 +23,7 @@ export default async function rescheduleBooking(
 
   try {
     // 1. Fetch Booking
-    const booking = await fetchBookingDetailsfromDB(rescheduleData.bookingId);
+    const booking = await fetchBookingDetailsfromDB(fastify,rescheduleData.bookingId);
 
     if (booking.statusCode === 404) {
       return reply.code(404).send(booking);
@@ -64,6 +65,7 @@ export default async function rescheduleBooking(
     // 4. Recheck & Assign
     const oldPartnerId = booking.data.assignedpartnerid;
     const finalBookingStatus = await recheckAndAssignPartnerToBooking(
+      fastify, // Pass fastify for firebase access
       slotMapAndStatus.slotMap,
       booking.data,
       bookingDate,
@@ -96,9 +98,9 @@ export default async function rescheduleBooking(
 
   } catch (error) {
     log.error({ err: error }, "Critical error in rescheduleBooking");
-    return reply.code(500).send({ 
-        message: "Internal Server Error", 
-        error: error.message 
+    return reply.code(500).send({
+      message: "Internal Server Error",
+      error: error.message
     });
   }
 }
@@ -108,6 +110,7 @@ export default async function rescheduleBooking(
  * Kept separate to maintain your exact logic flow.
  */
 async function recheckAndAssignPartnerToBooking(
+  fastify, // Add fastify parameter
   slotMap,
   bookingData,
   bookingDate,
@@ -123,6 +126,7 @@ async function recheckAndAssignPartnerToBooking(
 
     // Step 1: Prioritize
     let prioritizedPartners = await prioritizePartners(
+      fastify,
       slotMap.availablePartners,
       coordinates,
       bookingDate,
@@ -144,6 +148,7 @@ async function recheckAndAssignPartnerToBooking(
 
     // Step 2: Recheck Availability
     const recheckPartnersAvailability = await recheckAvailabilityOfPartner(
+      fastify,
       slotMap["slot no."],
       prioritizedPartners,
       bookingDate,
@@ -158,6 +163,7 @@ async function recheckAndAssignPartnerToBooking(
     if (recheckPartnersAvailability.availablityStatus) {
       // Step 3: Process Reschedule
       const finalBookingStatus = await processReschedulingBooking(
+        fastify, // Pass fastify for Firebase access
         recheckPartnersAvailability,
         bookingData,
         bookingDate,
@@ -206,7 +212,7 @@ function prioritizePartnersAccordingToPreviousPartner(
   try {
     // 1. Create a Set for fast existence check O(1)
     const previousPartnerIds = new Set(previousPartnerList.map((p) => p.id));
-    
+
     // 2. Create a Map for fast index lookup O(1)
     // { "partnerA": 0, "partnerB": 1 }
     const indexMap = new Map();
@@ -215,9 +221,9 @@ function prioritizePartnersAccordingToPreviousPartner(
     // Logic A: If counts match (Original logic maintained)
     if (prioritizedPartners.length === previousPartnerList.length) {
       const assignedIndex = previousPartnerList.findIndex((p) => p.id === assigned.id);
-      
+
       const priorityPartners = prioritizedPartners.filter((p) => previousPartnerIds.has(p.id));
-      
+
       // Fast Sort using Map
       priorityPartners.sort((a, b) => {
         return (indexMap.get(a.id) || 0) - (indexMap.get(b.id) || 0);
@@ -230,10 +236,10 @@ function prioritizePartnersAccordingToPreviousPartner(
 
     // Logic B: Complex filtering (Original logic optimized)
     const sortedPrioritizedPartners = [...prioritizedPartners].sort((a, b) => {
-         // Use Map for speed instead of array.indexOf
-         const idxA = indexMap.has(a.id) ? indexMap.get(a.id) : 9999;
-         const idxB = indexMap.has(b.id) ? indexMap.get(b.id) : 9999;
-         return idxA - idxB;
+      // Use Map for speed instead of array.indexOf
+      const idxA = indexMap.has(a.id) ? indexMap.get(a.id) : 9999;
+      const idxB = indexMap.has(b.id) ? indexMap.get(b.id) : 9999;
+      return idxA - idxB;
     });
 
     // Single pass filtering is hard here due to specific order requirements, 
@@ -243,13 +249,13 @@ function prioritizePartnersAccordingToPreviousPartner(
     const notPrevious = [];
 
     for (const partner of sortedPrioritizedPartners) {
-        if (partner.id === assigned.id) {
-            removeAssigned.push(partner);
-        } else if (previousPartnerIds.has(partner.id)) {
-            previous.push(partner);
-        } else {
-            notPrevious.push(partner);
-        }
+      if (partner.id === assigned.id) {
+        removeAssigned.push(partner);
+      } else if (previousPartnerIds.has(partner.id)) {
+        previous.push(partner);
+      } else {
+        notPrevious.push(partner);
+      }
     }
 
     return [...notPrevious, ...previous, ...removeAssigned];

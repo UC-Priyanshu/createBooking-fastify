@@ -1,38 +1,21 @@
 import { buildApp } from './app.js';
 
-async function start() {
-  let app;
+let app;
 
+async function start() {
   try {
     app = await buildApp();
 
-    await app.ready();
-
-    const { PORT, HOST, NODE_ENV } = app.config;
+    const { PORT, HOST } = app.config;
 
     await app.listen({
       port: PORT,
       host: HOST,
     });
 
-    const signals = ['SIGINT', 'SIGTERM'];
-
-    for (const signal of signals) {
-      process.on(signal, async () => {
-        app.log.warn(`Received ${signal}, closing server gracefully...`);
-
-        try {
-          await app.close();
-          app.log.info('Server closed successfully');
-          process.exit(0);
-        } catch (err) {
-          app.log.error('Error during shutdown', err);
-          process.exit(1);
-        }
-      });
-    }
+    app.log.info(`Server running at ${HOST}:${PORT}`);
   } catch (error) {
-    if (app && app.log) {
+    if (app?.log) {
       app.log.error(error, 'Failed to start server');
     } else {
       console.error('Failed to start server:', error);
@@ -41,15 +24,30 @@ async function start() {
   }
 }
 
-// Global Uncaught Handlers (Safety Net)
+/* Graceful shutdown */
+async function shutdown(signal) {
+  if (!app) return;
+
+  app.log.warn(`Received ${signal}, shutting down...`);
+  try {
+    await app.close();
+    app.log.info('Server closed cleanly');
+  } catch (err) {
+    app.log.error('Error during shutdown', err);
+  }
+}
+
+['SIGINT', 'SIGTERM'].forEach(signal => {
+  process.on(signal, shutdown);
+});
+
+/* Safety net (log only) */
 process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
-  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Rejection:', reason);
-  process.exit(1);
 });
 
 start();

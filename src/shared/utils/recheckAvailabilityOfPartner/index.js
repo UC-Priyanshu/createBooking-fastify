@@ -1,150 +1,102 @@
-import { firestore } from "../../../plugin/firebase.js";
-// import logger from "../logger.js";
-
 async function recheckAvailabilityOfPartner(
-    slotNo,
-    prioritizedPartners,
-    bookingDate,
-    bookingData,
-    rescheduleData
+  fastify,
+  slotNo,
+  prioritizedPartners,
+  bookingDate,
+  bookingData,
+  rescheduleData
 ) {
-    // logger.info({line: 10, msg: "recheckAvailabilityOfPartner"});
+  const firestore = fastify.firebase.firestore;
+  const dateId = bookingDate.replace(/-/g, "");
+
+  const partnerMissedLeadReasonListOfMap = [];
+
+  for (const partner of prioritizedPartners) {
+    const timingRef = firestore
+      .collection("partner")
+      .doc(partner.id)
+      .collection("timings")
+      .doc(dateId);
+
+    let snapshot;
     try {
-        const convertedDateString = bookingDate.replace(/-/g, "");
-        let statusOfAvailability = false;
-        let availablePartnerwithHighestPriority = null;
-        let partnerMissedLeadReasonListOfMap = [];
-        
-        console.log(`[RECHECK] Starting to check ${prioritizedPartners.length} partners for slot ${slotNo}`);
-        
-        for (const partner of prioritizedPartners) {
-            // logger.info({line: 17, partnerId: partner.id});
-
-            const docRef = firestore
-                .collection("partner")
-                .doc(partner.id)
-                .collection("timings")
-                .doc(convertedDateString);
-
-            const snapshot = await docRef.get();
-
-            // logger.info({line: 22, partner});
-
-            if (snapshot.exists) {
-                const data = snapshot.data();
-                // logger.info({
-                //     line: 27,
-                //     leave: data.leave,
-                //     available: data.available,
-                //     booked: data.booked,
-                //     nonWorkingSlots: data.nonWorkingSlots,
-                //     partner: partner.id,
-                // });
-                if (
-                    rescheduleData &&
-                    rescheduleData.status === true &&
-                    bookingData.listofbookedslots.some((slot) =>
-                        data.leave.includes(slot)
-                    ) &&
-                    data.leave.includes(slotNo)
-                ) {
-                    // logger.info({rescheduleData});
-
-                    /// check that is it missed lead or not
-                    partnerMissedLeadReasonListOfMap.push({
-                        partner: partner.id,
-                        reason: "Partner is on leave",
-                    });
-                    // logger.info({
-                    //     line: 54,
-                    //     msg: "partner is on leave",
-                    //     partner: partner.id,
-                    // });
-
-
-                    continue;
-                } else if (data.available.includes(slotNo)) {
-                    statusOfAvailability = true;
-                    availablePartnerwithHighestPriority = partner;
-                } else if (
-                    data.booked.includes(slotNo) &&
-                    rescheduleData != undefined &&
-                    rescheduleData.status === true &&
-                    bookingData.listofbookedslots.includes(slotNo)
-                ) {
-                    statusOfAvailability = true;
-                    availablePartnerwithHighestPriority = partner;
-                } else {
-                    statusOfAvailability = false;
-                    availablePartnerwithHighestPriority = null;
-
-
-                    /// check that is it missed lead or not
-
-                    if (
-                        data.nonWorkingSlots.includes(slotNo)) {
-                        // logger.info({
-                        //     line: 74,
-                        //     msg: "partner is not available Due to Non working slots",
-                        //     partner: partner.id,
-                        // });
-                        partnerMissedLeadReasonListOfMap.push({
-                            partner: partner.id,
-                            reason: "Partner is not available Due to Non working slots",
-                        });
-                    } else if (data.leave.includes(slotNo)) {
-                        // logger.info({
-                        //     line: 78,
-                        //     msg: "partner is on leave",
-                        //     partner: partner.id,
-                        // });
-                        partnerMissedLeadReasonListOfMap.push({
-                            partner: partner.id,
-                            reason: "Partner is on leave",
-                        });
-                    }
-
-
-                    continue;
-                }
-            } else {
-                // logger.info({line: 60, msg: "partner timing doc does not exist"});
-                statusOfAvailability = true;
-                availablePartnerwithHighestPriority = partner;
-            }
-            
-            // If we found an available partner, return immediately
-            if (statusOfAvailability) {
-                return {
-                    partner: availablePartnerwithHighestPriority,
-                    availablityStatus: true,
-                    partnerMissedLeadReasonListOfMap
-                };
-            }
-            // Otherwise, continue checking the next partner
-        }
-        return {
-            statusCode: 400,
-            message: "All Partner is on leave.",
-            availablityStatus: false,
-            partnerMissedLeadReasonListOfMap
-        };
-    } catch (error) {
-        // logger.info({line: 78, error});
-        return {
-            statusCode: 404,
-            message:
-                "Due to some technical issue, we can not place your booking. Please try again later!",
-            availablityStatus: false,
-        };
+      snapshot = await timingRef.get();
+    } catch {
+      continue; // skip partner on read failure
     }
-    // logger.info({
-    //   line: 9,
-    //   slotNo,
-    //   prioritizedPartners,
-    //   bookingDate,
-    //   bookingData,
-    // });
+
+    // If timing doc does NOT exist → partner available
+    if (!snapshot.exists) {
+      return {
+        partner,
+        availablityStatus: true,
+        partnerMissedLeadReasonListOfMap,
+      };
+    }
+
+    const data = snapshot.data();
+
+    // Convert arrays to Sets for O(1) lookup
+    const available = new Set(data.available || []);
+    const booked = new Set(data.booked || []);
+    const leave = new Set(data.leave || []);
+    const nonWorkingSlots = new Set(data.nonWorkingSlots || []);
+
+    /* ---------------- RESCHEDULE LEAVE CHECK ---------------- */
+    if (
+      rescheduleData?.status === true &&
+      bookingData.listofbookedslots?.some((slot) => leave.has(slot)) &&
+      leave.has(slotNo)
+    ) {
+      partnerMissedLeadReasonListOfMap.push({
+        partner: partner.id,
+        reason: "Partner is on leave",
+      });
+      continue;
+    }
+
+    /* ---------------- AVAILABLE SLOT ---------------- */
+    if (available.has(slotNo)) {
+      return {
+        partner,
+        availablityStatus: true,
+        partnerMissedLeadReasonListOfMap,
+      };
+    }
+
+    /* ---------------- RESCHEDULE BOOKED SLOT ---------------- */
+    if (
+      booked.has(slotNo) &&
+      rescheduleData?.status === true &&
+      bookingData.listofbookedslots?.includes(slotNo)
+    ) {
+      return {
+        partner,
+        availablityStatus: true,
+        partnerMissedLeadReasonListOfMap,
+      };
+    }
+
+    /* ---------------- MISSED LEAD REASONS ---------------- */
+    if (nonWorkingSlots.has(slotNo)) {
+      partnerMissedLeadReasonListOfMap.push({
+        partner: partner.id,
+        reason: "Partner is not available Due to Non working slots",
+      });
+    } else if (leave.has(slotNo)) {
+      partnerMissedLeadReasonListOfMap.push({
+        partner: partner.id,
+        reason: "Partner is on leave",
+      });
+    }
+  }
+
+  return {
+    statusCode: 400,
+    message: "All Partner is on leave.",
+    availablityStatus: false,
+    partnerMissedLeadReasonListOfMap,
+  };
 }
 
 export default recheckAvailabilityOfPartner;
