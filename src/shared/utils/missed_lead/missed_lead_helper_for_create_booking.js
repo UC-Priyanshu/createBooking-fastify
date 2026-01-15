@@ -5,9 +5,6 @@ function convertYYYYMMDDToDate(yyyymmdd) {
   return new Date(year, month, day);
 }
 
-/* =========================================================
-   MAIN ENTRY (NON-BLOCKING)
-   ========================================================= */
 async function initMissedLeads(
   fastify,
   partnerMissedLeadReasonListOfMap,
@@ -20,7 +17,6 @@ async function initMissedLeads(
     bookingDate.replace(/-/g, "")
   );
 
-  // 🔥 Fire-and-forget (DO NOT await)
   setImmediate(() => {
     const tasks = partnerMissedLeadReasonListOfMap.map(({ partner, reason }) =>
       handleMissedLead(
@@ -36,9 +32,6 @@ async function initMissedLeads(
   });
 }
 
-/* =========================================================
-   SINGLE PARTNER HANDLER (PARALLEL SAFE)
-   ========================================================= */
 async function handleMissedLead(
   fastify,
   partnerId,
@@ -75,9 +68,6 @@ async function handleMissedLead(
   ]);
 }
 
-/* =========================================================
-   MISSED LEAD WRITE (FAST & SAFE)
-   ========================================================= */
 async function initMissedLeadForPartner(
   firestore,
   FieldValue,
@@ -129,9 +119,7 @@ async function initMissedLeadForPartner(
   });
 }
 
-/* =========================================================
-   NOTIFICATION (NON-BLOCKING)
-   ========================================================= */
+
 async function sendNotificationForMissedLeads(fastify, partnerId, reason) {
   const { firestore, admin } = fastify.firebase;
 
@@ -165,7 +153,6 @@ async function sendNotificationForMissedLeads(fastify, partnerId, reason) {
     },
   };
 
-  // 🔥 Do not await response
   admin.messaging().send(message).catch(() => {});
 }
 

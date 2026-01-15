@@ -3,7 +3,7 @@ const bodySchema = {
   required: ['preferredPartner', 'bookingDate'],
   properties: {
     preferredPartner: { type: 'string', minLength: 1 },
-    bookingDate: { type: 'string', format: 'date' }, // Validates YYYY-MM-DD format automatically
+    bookingDate: { type: 'string', format: 'date' }, // YYYY-MM-DD
     rescheduleData: {
       type: 'object',
       properties: {

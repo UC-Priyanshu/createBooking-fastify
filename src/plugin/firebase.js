@@ -7,7 +7,6 @@ let firestoreInstance = null;
 let geoFirestoreInstance = null;
 
 async function firebasePlugin(fastify) {
-  // Initialize Firebase ONCE
   if (!admin.apps.length) {
     admin.initializeApp({
       credential: admin.credential.cert(credentials),
@@ -16,7 +15,6 @@ async function firebasePlugin(fastify) {
     fastify.log.info('Firebase Admin initialized');
   }
 
-  // Create Firestore singleton
   if (!firestoreInstance) {
     firestoreInstance = admin.firestore();
 

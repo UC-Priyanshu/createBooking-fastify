@@ -6,46 +6,46 @@ import recheckAvailabilityOfPartner from "../../shared/utils/recheckAvailability
 import { processReschedulingBooking } from "./processReschedulingBooking.js";
 import { sendNotification } from "../../shared/utils/sendNotification.js";
 
-/**
- * Main Reschedule Service
- * Logic remains exactly the same, but optimized for speed and Fastify.
- */
 export default async function rescheduleBooking(
-  fastify, // Add fastify parameter to access Firebase
+  fastify,
   preferredPartner,
   bookingDate,
-  rescheduleData,
-  reply // Pass Fastify 'reply' object instead of Express 'res'
+  rescheduleData
 ) {
-  // Use Fastify's request logger for better tracing (includes Req ID)
-  // If reply.request is not available, fallback to console
-  const log = reply.request ? reply.request.log : console;
 
   try {
-    // 1. Fetch Booking
-    const booking = await fetchBookingDetailsfromDB(fastify,rescheduleData.bookingId);
+    const booking = await fetchBookingDetailsfromDB(fastify, rescheduleData.bookingId);
 
     if (booking.statusCode === 404) {
-      return reply.code(404).send(booking);
+      return {
+        statusCode: 404,
+        status: "failed",
+        message: booking.message
+      };
     }
 
-    // 2. Validate Reschedule Limit (Business Logic)
+    fastify.log.info({ 
+      bookingId: rescheduleData.bookingId,
+      hasAssignedPartner: !!booking.data.assignedpartnerid,
+      hasBookingDate: !!booking.data.bookingdateIsoString,
+      bookingStatus: booking.data.status
+    }, "Fetched booking for reschedule");
+
     if (booking.data.reschedule && rescheduleData.role === "client") {
       const clientRescheduleCount = booking.data.reschedule.filter(
         (r) => r.rescheduleBy === "client"
       ).length;
 
       if (clientRescheduleCount >= 2) {
-        log.warn({ bookingId: rescheduleData.bookingId }, "Max reschedule limit reached");
-        return reply.code(400).send({
+        fastify.log.warn({ bookingId: rescheduleData.bookingId }, "Max reschedule limit reached");
+        return {
           statusCode: 400,
           status: "failed",
-          message: "Booking can't be rescheduled more than 2 times.",
-        });
+          message: "Booking can't be rescheduled more than 2 times."
+        };
       }
     }
 
-    // 3. Get Slot Map (Parallelizable logic kept sequential as per original strict flow)
     const slotMapAndStatus = await getSlotMapAndStatus(
       booking.data,
       preferredPartner,
@@ -54,69 +54,64 @@ export default async function rescheduleBooking(
     );
 
     if (slotMapAndStatus.statusCode !== 200) {
-      log.warn({ msg: "Slot map not found", error: slotMapAndStatus });
-      return reply.code(400).send({
+      fastify.log.warn({ msg: "Slot map not found", error: slotMapAndStatus });
+      return {
         statusCode: 400,
         status: "Unknown",
-        message: "Unknown Error Occurs in Finding SlotsMap.",
-      });
+        message: "Unknown Error Occurs in Finding SlotsMap."
+      };
     }
 
-    // 4. Recheck & Assign
     const oldPartnerId = booking.data.assignedpartnerid;
     const finalBookingStatus = await recheckAndAssignPartnerToBooking(
-      fastify, // Pass fastify for firebase access
+      fastify,
       slotMapAndStatus.slotMap,
       booking.data,
       bookingDate,
       rescheduleData,
-      preferredPartner,
-      log // Pass logger down to avoid global logger overhead
+      preferredPartner
     );
 
-    // 5. Final Response Handling
     if (finalBookingStatus.statusCode === 200) {
       const newPartnerId = finalBookingStatus.newPartnerRef.id;
       const isSamePartner = newPartnerId === oldPartnerId;
 
-      // Non-blocking notification (Fire and forget to speed up response)
       sendNotification(
         newPartnerId,
         booking.data.name,
         booking.data.orderId,
         isSamePartner
-      ).catch(err => log.error({ err }, 'Notification failed'));
+      ).catch(err => fastify.log.error({ err }, 'Notification failed'));
 
-      return reply.code(200).send({
-        statusCode: finalBookingStatus.statusCode,
+      return {
+        statusCode: 200,
         status: finalBookingStatus.status,
         message: finalBookingStatus.message,
-      });
+        bookingId: booking.data.orderId
+      };
     } else {
-      return reply.code(400).send(finalBookingStatus);
+      return finalBookingStatus;
     }
 
   } catch (error) {
-    log.error({ err: error }, "Critical error in rescheduleBooking");
-    return reply.code(500).send({
+    fastify.log.error({ err: error }, "Critical error in rescheduleBooking");
+    return {
+      statusCode: 500,
+      status: "Error",
       message: "Internal Server Error",
       error: error.message
-    });
+    };
   }
 }
 
-/**
- * Helper: Recheck and Assign
- * Kept separate to maintain your exact logic flow.
- */
+
 async function recheckAndAssignPartnerToBooking(
-  fastify, // Add fastify parameter
+  fastify,
   slotMap,
   bookingData,
   bookingDate,
   rescheduleData,
-  preferredPartner,
-  log
+  preferredPartner
 ) {
   try {
     const coordinates = {
@@ -124,7 +119,6 @@ async function recheckAndAssignPartnerToBooking(
       longitude: bookingData.longitude,
     };
 
-    // Step 1: Prioritize
     let prioritizedPartners = await prioritizePartners(
       fastify,
       slotMap.availablePartners,
@@ -134,7 +128,6 @@ async function recheckAndAssignPartnerToBooking(
       preferredPartner
     );
 
-    // Logic: Assign Previous Partner if applicable
     if (
       rescheduleData?.status === true &&
       preferredPartner === "none"
@@ -146,7 +139,6 @@ async function recheckAndAssignPartnerToBooking(
       );
     }
 
-    // Step 2: Recheck Availability
     const recheckPartnersAvailability = await recheckAvailabilityOfPartner(
       fastify,
       slotMap["slot no."],
@@ -161,9 +153,8 @@ async function recheckAndAssignPartnerToBooking(
     }
 
     if (recheckPartnersAvailability.availablityStatus) {
-      // Step 3: Process Reschedule
       const finalBookingStatus = await processReschedulingBooking(
-        fastify, // Pass fastify for Firebase access
+        fastify, 
         recheckPartnersAvailability,
         bookingData,
         bookingDate,
@@ -173,10 +164,18 @@ async function recheckAndAssignPartnerToBooking(
       if (finalBookingStatus.statusCode === 200) {
         return finalBookingStatus;
       }
+      
+      // Log the actual error from processReschedulingBooking
+      fastify.log.error({ 
+        finalBookingStatus, 
+        bookingId: bookingData.orderId 
+      }, "processReschedulingBooking failed");
+      
       return {
-        statusCode: 400,
-        status: "Unknown",
-        message: "Error occurs in rescheduling.",
+        statusCode: finalBookingStatus.statusCode || 400,
+        status: finalBookingStatus.status || "Unknown",
+        message: finalBookingStatus.message || "Error occurs in rescheduling.",
+        error: finalBookingStatus.error
       };
     }
 
@@ -187,7 +186,7 @@ async function recheckAndAssignPartnerToBooking(
     };
 
   } catch (error) {
-    log.error({ err: error }, "Error in recheckAndAssignPartnerToBooking");
+    fastify.log.error({ err: error }, "Error in recheckAndAssignPartnerToBooking");
     return {
       statusCode: 400,
       status: "Unknown",
@@ -196,10 +195,7 @@ async function recheckAndAssignPartnerToBooking(
   }
 }
 
-/**
- * Helper: Optimized Sorting
- * OPTIMIZATION: Uses HashMap for O(1) lookup instead of O(n) indexOf inside sort.
- */
+
 function prioritizePartnersAccordingToPreviousPartner(
   prioritizedPartners,
   previousPartnerList,
@@ -210,21 +206,16 @@ function prioritizePartnersAccordingToPreviousPartner(
   }
 
   try {
-    // 1. Create a Set for fast existence check O(1)
     const previousPartnerIds = new Set(previousPartnerList.map((p) => p.id));
 
-    // 2. Create a Map for fast index lookup O(1)
-    // { "partnerA": 0, "partnerB": 1 }
     const indexMap = new Map();
     previousPartnerList.forEach((p, index) => indexMap.set(p.id, index));
 
-    // Logic A: If counts match (Original logic maintained)
     if (prioritizedPartners.length === previousPartnerList.length) {
       const assignedIndex = previousPartnerList.findIndex((p) => p.id === assigned.id);
 
       const priorityPartners = prioritizedPartners.filter((p) => previousPartnerIds.has(p.id));
 
-      // Fast Sort using Map
       priorityPartners.sort((a, b) => {
         return (indexMap.get(a.id) || 0) - (indexMap.get(b.id) || 0);
       });
@@ -234,16 +225,12 @@ function prioritizePartnersAccordingToPreviousPartner(
       return part2.concat(part1);
     }
 
-    // Logic B: Complex filtering (Original logic optimized)
     const sortedPrioritizedPartners = [...prioritizedPartners].sort((a, b) => {
-      // Use Map for speed instead of array.indexOf
       const idxA = indexMap.has(a.id) ? indexMap.get(a.id) : 9999;
       const idxB = indexMap.has(b.id) ? indexMap.get(b.id) : 9999;
       return idxA - idxB;
     });
 
-    // Single pass filtering is hard here due to specific order requirements, 
-    // keeping original filter logic but on the pre-sorted list.
     const removeAssigned = [];
     const previous = [];
     const notPrevious = [];
@@ -261,7 +248,7 @@ function prioritizePartnersAccordingToPreviousPartner(
     return [...notPrevious, ...previous, ...removeAssigned];
 
   } catch (error) {
-    console.error("Sorting error", error); // Fallback log
+    console.error("Sorting error", error); 
     return prioritizedPartners;
   }
 }

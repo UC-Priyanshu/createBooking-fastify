@@ -18,7 +18,6 @@ export async function assignBookingToPartner(
 
     const partnerRef = firestore.collection("partner").doc(currentPartner.id);
 
-    // Fetch only what is required
     const countPromise = isReschedule
       ? null
       : firestore.collection("BOOKINGS").doc("COUNTS").get();
@@ -37,7 +36,6 @@ export async function assignBookingToPartner(
 
     const partnerData = partnerSnap.data();
 
-    /* ---------- PREPARE ASSIGNED PARTNER DATA ---------- */
     const assigned = {
       hubId: partnerData.hubIds,
       id: currentPartner.id,
@@ -50,7 +48,6 @@ export async function assignBookingToPartner(
     const assignedpartnerid = currentPartner.id;
     const finalCredits = Math.round(bookingData.priceToPay / 50);
 
-    /* ---------- SLOT CALCULATION ---------- */
     const slotNumber = isReschedule
       ? rescheduleData.rescheduleSlotNumber
       : bookingData.slotnumber;
@@ -65,13 +62,11 @@ export async function assignBookingToPartner(
         listOfBookedSlots.push(slotNumber + i);
     }
 
-    /* ---------- BOOKING ID ---------- */
     let bookingid = bookingData.bookingid;
     if (!isReschedule && countSnap) {
       bookingid = (countSnap.data()?.count || 0) + 1;
     }
 
-    /* ---------- FINAL BOOKING DATA (NO MUTATION) ---------- */
     const finalBookingData = {
       ...bookingData,
       bookingid,
@@ -111,7 +106,6 @@ export async function assignBookingToPartner(
     const batchTime = Number(process.hrtime.bigint() - batchStart) / 1_000_000;
     console.log(`      [DB] Batch commit (create booking): ${batchTime.toFixed(2)}ms`);
 
-    /* ---------- NON-BLOCKING NOTIFICATION ---------- */
     setImmediate(() => {
       sendNotification(
         fastify,

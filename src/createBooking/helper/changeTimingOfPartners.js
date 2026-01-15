@@ -8,9 +8,8 @@ export async function changeTimingOfPartners(
   const { firestore } = fastify.firebase;
 
   const partnerId = recheckAvailabilityOfPartner.partner.id;
-  const timingId = bookingDate.replace(/-/g, ""); // faster than substrings
+  const timingId = bookingDate.replace(/-/g, ""); 
 
-  /* ---------- SLOT CALCULATION (FAST) ---------- */
   const slotStart = bookingData.slotnumber;
   const slotCount = Math.ceil(bookingData.bookingsminutes / 30);
   const listOfBookedSlots = Array.from(
@@ -18,7 +17,6 @@ export async function changeTimingOfPartners(
     (_, i) => slotStart + i
   );
 
-  /* ---------- FIRESTORE REFS ---------- */
   const timingRef = firestore
     .collection("partner")
     .doc(partnerId)
@@ -28,7 +26,6 @@ export async function changeTimingOfPartners(
   const partnerRef = firestore.collection("partner").doc(partnerId);
 
   try {
-    /* ---------- PARALLEL READ ---------- */
     const readStart = process.hrtime.bigint();
     const [timingSnap, partnerSnap] = await Promise.all([
       timingRef.get(),
@@ -41,9 +38,6 @@ export async function changeTimingOfPartners(
       ? partnerSnap.data().nonWorkingSlots || []
       : [];
 
-    /* =========================================================
-       EXISTING TIMING DOCUMENT
-       ========================================================= */
     if (timingSnap.exists) {
       const data = timingSnap.data();
 
@@ -74,10 +68,6 @@ export async function changeTimingOfPartners(
         message: "Booking updated successfully",
       };
     }
-
-    /* =========================================================
-       NEW TIMING DOCUMENT
-       ========================================================= */
     const bookedSet = new Set(listOfBookedSlots);
     const availableSlots = [];
 
@@ -111,9 +101,6 @@ export async function changeTimingOfPartners(
   }
 }
 
-/* =========================================================
-   UTILITIES (FAST)
-   ========================================================= */
 
 function getCurrentDateFormatted() {
   const now = new Date();

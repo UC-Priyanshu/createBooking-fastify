@@ -29,7 +29,6 @@ async function checkAPIStatus(fastify) {
         .get()
         .then((doc) => {
             if (doc.exists && doc.data().status) {
-                // If status is false, skip the first API
                 return {
                     BearerToken: doc.data().Authorization,
                     Appversion: doc.data().App_Version,
@@ -48,7 +47,7 @@ async function checkAPIStatus(fastify) {
         })
         .catch((error) => {
             // logger.info({line: 120, error});
-            return true; // Proceed with first API in case of error fetching status
+            return true; 
         });
 }
 

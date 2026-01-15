@@ -12,7 +12,6 @@ export async function createBookingHandler(request, reply) {
         rescheduleData,
     } = body;
 
-    /* ---------- FAST DATE VALIDATION (timestamp based) ---------- */
     const todayMidnight = new Date();
     todayMidnight.setHours(0, 0, 0, 0);
 
@@ -23,7 +22,6 @@ export async function createBookingHandler(request, reply) {
         });
     }
 
-    /* ---------- RESCHEDULE FLOW ---------- */
     if (rescheduleData?.status === true) {
         const { bookingId, rescheduleSlotNumber } = rescheduleData;
 
@@ -33,7 +31,9 @@ export async function createBookingHandler(request, reply) {
             });
         }
 
-        // Return data, let Fastify handle response
+        const rescheduleStart = process.hrtime.bigint();
+        console.log(`\n[RESCHEDULE BOOKING] Flow started at: ${new Date().toISOString()}`);
+
         const result = await rescheduleBooking(
             fastify,
             preferredPartner,
@@ -41,7 +41,12 @@ export async function createBookingHandler(request, reply) {
             rescheduleData
         );
 
-        return reply.send(result);
+        const rescheduleEnd = process.hrtime.bigint();
+        const totalDuration = Number(rescheduleEnd - rescheduleStart) / 1_000_000;
+        console.log(`[RESCHEDULE BOOKING] ✓ Total flow completed in: ${totalDuration.toFixed(2)}ms (${(totalDuration / 1000).toFixed(2)}s)`);
+        console.log(`[RESCHEDULE BOOKING] Status: ${result.status}\n`);
+
+        return reply.code(result.statusCode || 200).send(result);
     }
 
     /* ---------- NEW BOOKING FLOW ---------- */

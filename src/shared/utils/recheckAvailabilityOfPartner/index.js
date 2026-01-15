@@ -11,7 +11,6 @@ async function recheckAvailabilityOfPartner(
 
   const partnerMissedLeadReasonListOfMap = [];
 
-  // 🚀 OPTIMIZATION: Batch all timing document reads in parallel
   const timingPromises = prioritizedPartners.map((partner) =>
     firestore
       .collection("partner")
@@ -19,7 +18,7 @@ async function recheckAvailabilityOfPartner(
       .collection("timings")
       .doc(dateId)
       .get()
-      .catch(() => null) // Return null on error instead of throwing
+      .catch(() => null) 
   );
   
   const timingSnapshots = await Promise.all(timingPromises);

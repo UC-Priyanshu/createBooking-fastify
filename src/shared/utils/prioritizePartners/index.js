@@ -39,7 +39,6 @@ function prioritizeBeauticians(
   rescheduleData,
   preferredPartner
 ) {
-  // Compute score in single pass
   for (let i = 0; i < beauticians.length; i++) {
     beauticians[i].score = scoreBeautician(
       beauticians[i],
@@ -47,7 +46,6 @@ function prioritizeBeauticians(
     );
   }
 
-  // Fast path: reschedule with preferred partner
   if (rescheduleData?.status === true && preferredPartner !== "none") {
     const index = beauticians.findIndex(
       (b) => b.id === preferredPartner

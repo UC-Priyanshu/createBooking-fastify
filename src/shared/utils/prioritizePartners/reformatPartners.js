@@ -95,13 +95,11 @@ async function reformatPartners(fastify, partnersMap, coordinates, bookingDate) 
   const reformatStart = process.hrtime.bigint();
   console.log(`      [REFORMAT] Processing ${partnersMap.length} partners...`);
 
-  // 🚀 PRE-WARM: Ensure Mapbox token is cached BEFORE parallel API calls
   if (!MAPBOX_TOKEN_CACHE) {
     const status = await checkAPIStatus(fastify);
     MAPBOX_TOKEN_CACHE = getMAPBOXAPIToken(status?.MAPBOX_Authorization);
   }
 
-  // 🚀 PHASE 1: Batch all Firestore reads in parallel
   const partnerRefs = partnersMap.map(({ id }) => 
     firestore.collection("partner").doc(id)
   );
@@ -113,7 +111,6 @@ async function reformatPartners(fastify, partnersMap, coordinates, bookingDate) 
     ),
   ]);
 
-  // 🚀 PHASE 2: Extract valid partner data
   const validPartners = [];
   for (let i = 0; i < partnerDocs.length; i++) {
     const doc = partnerDocs[i];
@@ -131,13 +128,11 @@ async function reformatPartners(fastify, partnersMap, coordinates, bookingDate) 
     });
   }
 
-  // 🚀 PHASE 3: ALL Mapbox distance calls in TRUE parallel (uses pre-cached token)
   const distancePromises = validPartners.map((p) =>
     calculateDistanceFast(p.latitude, p.longitude, coordinates)
   );
   const distances = await Promise.all(distancePromises);
 
-  // 🚀 PHASE 4: Build final results
   const results = validPartners.map((p, i) => ({
     id: p.id,
     distance: distances[i],

@@ -1,7 +1,6 @@
 const SLOT_API_URL =
   "https://asia-south1-urbanculture5.cloudfunctions.net/availabilityOfSlots";
 
-/* ---------------- MAIN FUNCTION ---------------- */
 async function getSlotMapAndStatus(
   bodydetails,
   preferredPartner,
@@ -71,7 +70,6 @@ async function getSlotMapAndStatus(
   };
 }
 
-/* ---------------- FETCH WITH TIMEOUT ---------------- */
 async function fetchSlotAPIData(body) {
 //   const controller = new AbortController();
 //   const timeout = setTimeout(() => controller.abort(), 3500);

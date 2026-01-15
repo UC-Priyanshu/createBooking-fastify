@@ -10,7 +10,6 @@ function sha256Hash(value) {
 }
 
 async function getFacebookSdk() {
-	// Lazy-load so the server can boot even if the dependency is missing.
 	const mod = await import('facebook-nodejs-business-sdk');
 	return mod?.default ?? mod;
 }

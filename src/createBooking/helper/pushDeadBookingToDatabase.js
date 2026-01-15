@@ -9,7 +9,6 @@ export async function pushDeadBookingToDatabase(fastify, bookingData) {
 
   try {
     await firestore.runTransaction(async (tx) => {
-      /* ---------- READ COUNTER (LOCKED) ---------- */
       const countDoc = await tx.get(countRef);
       const currentCount = countDoc.exists
         ? countDoc.data().count || 0
@@ -17,7 +16,6 @@ export async function pushDeadBookingToDatabase(fastify, bookingData) {
 
       const newBookingId = currentCount + 1;
 
-      /* ---------- PREPARE DATA ---------- */
       const finalBookingData = {
         ...bookingData,
         bookingid: newBookingId,
@@ -26,7 +24,6 @@ export async function pushDeadBookingToDatabase(fastify, bookingData) {
         status: "dead(NOR)",
       };
 
-      /* ---------- ATOMIC WRITES ---------- */
       tx.set(countRef, { count: newBookingId }, { merge: true });
       tx.set(bookingRef, finalBookingData);
     });
@@ -38,7 +35,6 @@ export async function pushDeadBookingToDatabase(fastify, bookingData) {
         "Due to high demand, your booking can not be placed at the moment. Please try again later.",
     };
   } catch (error) {
-    // Let Fastify log this centrally if you want
     return {
       statusCode: 500,
       status: "Error",

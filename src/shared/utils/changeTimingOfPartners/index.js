@@ -25,8 +25,8 @@ async function changeTimingOfPartners(
         const batch = db.batch();
 
         const timingref = db
-            .collection("partner") // later change it to "partner";
-            .doc(recheckAvailabilityOfPartner.partner.id) // Later change it to "recheckAvailabilityOfPartner.partner.id";
+            .collection("partner") 
+            .doc(recheckAvailabilityOfPartner.partner.id) 
             .collection("timings")
             .doc(timingid);
 
@@ -37,7 +37,6 @@ async function changeTimingOfPartners(
             const available = data.available || [];
             const booked = data.booked || [];
 
-            // Transfer elements from 'available' to 'booked'
             listOfBookedSlots.forEach((element) => {
                 if (available.includes(element)) {
                     available.splice(available.indexOf(element), 1);
@@ -45,7 +44,6 @@ async function changeTimingOfPartners(
                 }
             });
 
-            // Update the document
             await timingref.update({
                 available: FieldValue.arrayRemove(...listOfBookedSlots),
                 booked: FieldValue.arrayUnion(...listOfBookedSlots),

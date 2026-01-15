@@ -13,7 +13,6 @@ import { removeUsersFromAudience } from "../../shared/utils/audiences_helper.js"
 const PURCHASE_CANCELLED_AUDIENCE_ID =
   process.env.PURCHASE_CANCELLED_AUDIENCE_ID;
 
-/* ---------------- MAIN FUNCTION ---------------- */
 async function createNewBooking(
   fastify,
   bookingData,
@@ -57,7 +56,6 @@ async function createNewBooking(
     /* -------- ASSIGN PARTNER -------- */
     const assignPartnerStart = process.hrtime.bigint();
     
-    // 🚀 OPTIMIZATION: Pre-fetch user document in parallel with partner assignment
     const userRef = fastify.firebase.firestore.collection("users").doc(bookingData.clientid);
     const userDocPromise = userRef.get();
     
@@ -78,7 +76,6 @@ async function createNewBooking(
     ) {
       try {
         const walletUpdateStart = process.hrtime.bigint();
-        // User doc was pre-fetched in parallel - just await it now
         const userDoc = await userDocPromise;
         const userDocTime = Number(process.hrtime.bigint() - walletUpdateStart) / 1_000_000;
         console.log(`  [DB] Fetch user document: ${userDocTime.toFixed(2)}ms (pre-fetched)`);
