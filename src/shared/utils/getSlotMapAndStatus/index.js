@@ -76,6 +76,9 @@ async function fetchSlotAPIData(body) {
 //   const controller = new AbortController();
 //   const timeout = setTimeout(() => controller.abort(), 3500);
 
+  const startTime = process.hrtime.bigint();
+  console.log(`    [EXTERNAL API] Slot API request started at: ${new Date().toISOString()}`);
+
   try {
     const response = await fetch(SLOT_API_URL, {
       method: "POST",
@@ -84,6 +87,10 @@ async function fetchSlotAPIData(body) {
     //   signal: controller.signal,
     });
 
+    const endTime = process.hrtime.bigint();
+    const duration = Number(endTime - startTime) / 1_000_000;
+    console.log(`    [EXTERNAL API] Slot API response received in: ${duration.toFixed(2)}ms (${(duration / 1000).toFixed(2)}s)`);
+
     if (!response.ok) {
       return {
         error: response.statusText,
@@ -91,7 +98,11 @@ async function fetchSlotAPIData(body) {
       };
     }
 
-    return await response.json();
+    const jsonData = await response.json();
+    const totalTime = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+    console.log(`    [EXTERNAL API] Total time (including JSON parsing): ${totalTime.toFixed(2)}ms (${(totalTime / 1000).toFixed(2)}s)`);
+    
+    return jsonData;
   } catch (err) {
     return {
       error:

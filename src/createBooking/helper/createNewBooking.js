@@ -24,11 +24,15 @@ async function createNewBooking(
 
   try {
     /* -------- SLOT MAP -------- */
+    const slotMapStart = process.hrtime.bigint();
     const slotMapAndStatus = await getSlotMapAndStatus(
       bookingData,
       preferredPartner,
       bookingDate
     );
+    const slotMapEnd = process.hrtime.bigint();
+    const slotMapDuration = Number(slotMapEnd - slotMapStart) / 1_000_000;
+    console.log(`  [STEP 1] getSlotMapAndStatus: ${slotMapDuration.toFixed(2)}ms`);
 
     if (slotMapAndStatus.statusCode !== 200) {
       if (slotMapAndStatus.statusCode === 201) {
@@ -51,6 +55,7 @@ async function createNewBooking(
     }
 
     /* -------- ASSIGN PARTNER -------- */
+    const assignPartnerStart = process.hrtime.bigint();
     const finalBookingStatus = await recheckAndAssignPartnerToBooking(
       fastify,
       slotMapAndStatus.slotMap,
@@ -58,6 +63,9 @@ async function createNewBooking(
       bookingDate,
       preferredPartner
     );
+    const assignPartnerEnd = process.hrtime.bigint();
+    const assignPartnerDuration = Number(assignPartnerEnd - assignPartnerStart) / 1_000_000;
+    console.log(`  [STEP 2] recheckAndAssignPartnerToBooking: ${assignPartnerDuration.toFixed(2)}ms`);
 
     if (
       finalBookingStatus.statusCode === 200 &&
@@ -65,8 +73,12 @@ async function createNewBooking(
     ) {
       // updateWallet(fastify, bookingData).catch(() => { });
       try {
+        const walletUpdateStart = process.hrtime.bigint();
         const userRef = fastify.firebase.firestore.collection("users").doc(bookingData.clientid);
         const userDoc = await userRef.get();
+        const userDocTime = Number(process.hrtime.bigint() - walletUpdateStart) / 1_000_000;
+        console.log(`  [DB] Fetch user document: ${userDocTime.toFixed(2)}ms`);
+        
         if (!userDoc.exists) return;
         const userData = userDoc.data();
         // await removeUsersFromAudience(PURCHASE_CANCELLED_AUDIENCE_ID, [userData]);
@@ -83,7 +95,12 @@ async function createNewBooking(
         if (bookingData.couponId) {
           updateData.couponIds = fastify.firebase.FieldValue.arrayRemove(bookingData.couponId);
         }
+        const updateStart = process.hrtime.bigint();
         await userRef.update(updateData);
+        const updateTime = Number(process.hrtime.bigint() - updateStart) / 1_000_000;
+        const totalWalletTime = Number(process.hrtime.bigint() - walletUpdateStart) / 1_000_000;
+        console.log(`  [DB] Update user wallet: ${updateTime.toFixed(2)}ms`);
+        console.log(`  [STEP 3] Total wallet update: ${totalWalletTime.toFixed(2)}ms`);
       } catch (error) {
         return {
           statusCode: 400,
@@ -117,13 +134,18 @@ async function recheckAndAssignPartnerToBooking(
       latitude: bookingData.latitude,
       longitude: bookingData.longitude,
     };
+    const prioritizeStart = process.hrtime.bigint();
     const prioritizedPartners = await prioritizePartners(
       fastify,
       slotMap.availablePartners,
       coordinates,
       bookingDate
     );
+    const prioritizeEnd = process.hrtime.bigint();
+    const prioritizeDuration = Number(prioritizeEnd - prioritizeStart) / 1_000_000;
+    console.log(`    [SUB-STEP 2.1] prioritizePartners: ${prioritizeDuration.toFixed(2)}ms`);
 
+    const recheckStart = process.hrtime.bigint();
     const availability = await recheckAvailabilityOfPartner(
       fastify,
       slotMap["slot no."],
@@ -131,6 +153,9 @@ async function recheckAndAssignPartnerToBooking(
       bookingDate,
       bookingData
     );
+    const recheckEnd = process.hrtime.bigint();
+    const recheckDuration = Number(recheckEnd - recheckStart) / 1_000_000;
+    console.log(`    [SUB-STEP 2.2] recheckAvailabilityOfPartner: ${recheckDuration.toFixed(2)}ms`);
 
 
     if (!availability.availablityStatus) {
@@ -149,6 +174,7 @@ async function recheckAndAssignPartnerToBooking(
         };
     }
 
+    const assignStart = process.hrtime.bigint();
     const bookingStatus = await assignBookingToPartner(
       fastify,
       bookingData,
@@ -156,6 +182,9 @@ async function recheckAndAssignPartnerToBooking(
       availability,
       bookingDate
     );
+    const assignEnd = process.hrtime.bigint();
+    const assignDuration = Number(assignEnd - assignStart) / 1_000_000;
+    console.log(`    [SUB-STEP 2.3] assignBookingToPartner: ${assignDuration.toFixed(2)}ms`);
     if (bookingStatus?.statusCode !== 200) {
       return {
         statusCode: 400,
@@ -164,6 +193,7 @@ async function recheckAndAssignPartnerToBooking(
       };
     }
 
+    const timingUpdateStart = process.hrtime.bigint();
     const timingUpdate = await changeTimingOfPartners(
       fastify,
       bookingData,
@@ -171,6 +201,9 @@ async function recheckAndAssignPartnerToBooking(
       bookingDate,
       bookingStatus.bookingId
     );
+    const timingUpdateEnd = process.hrtime.bigint();
+    const timingUpdateDuration = Number(timingUpdateEnd - timingUpdateStart) / 1_000_000;
+    console.log(`    [SUB-STEP 2.4] changeTimingOfPartners: ${timingUpdateDuration.toFixed(2)}ms`);
 
     if (timingUpdate?.statusCode !== 200) {
       return {

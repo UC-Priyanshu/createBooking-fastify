@@ -61,12 +61,20 @@ export async function createBookingHandler(request, reply) {
         }
     }
 
+    const createBookingStart = process.hrtime.bigint();
+    console.log(`\n[CREATE BOOKING] Flow started at: ${new Date().toISOString()}`);
+
     const result = await createNewBooking(
         fastify,
         bookingData,
         preferredPartner,
         bookingDate
     );
+
+    const createBookingEnd = process.hrtime.bigint();
+    const totalDuration = Number(createBookingEnd - createBookingStart) / 1_000_000;
+    console.log(`[CREATE BOOKING] ✓ Total flow completed in: ${totalDuration.toFixed(2)}ms (${(totalDuration / 1000).toFixed(2)}s)`);
+    console.log(`[CREATE BOOKING] Status: ${result.status}\n`);
 
     return reply.send(result);
 }

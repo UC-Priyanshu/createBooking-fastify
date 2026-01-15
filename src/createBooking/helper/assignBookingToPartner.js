@@ -23,10 +23,13 @@ export async function assignBookingToPartner(
       ? null
       : firestore.collection("BOOKINGS").doc("COUNTS").get();
 
+    const fetchStart = process.hrtime.bigint();
     const [partnerSnap, countSnap] = await Promise.all([
       partnerRef.get(),
       countPromise,
     ]);
+    const fetchTime = Number(process.hrtime.bigint() - fetchStart) / 1_000_000;
+    console.log(`      [DB] Fetch partner & count docs: ${fetchTime.toFixed(2)}ms`);
 
     if (!partnerSnap.exists) {
       return { status: "error", message: "Partner not found" };
@@ -103,7 +106,10 @@ export async function assignBookingToPartner(
       batch.set(bookingRef, finalBookingData);
     }
 
+    const batchStart = process.hrtime.bigint();
     await batch.commit();
+    const batchTime = Number(process.hrtime.bigint() - batchStart) / 1_000_000;
+    console.log(`      [DB] Batch commit (create booking): ${batchTime.toFixed(2)}ms`);
 
     /* ---------- NON-BLOCKING NOTIFICATION ---------- */
     setImmediate(() => {

@@ -29,10 +29,13 @@ export async function changeTimingOfPartners(
 
   try {
     /* ---------- PARALLEL READ ---------- */
+    const readStart = process.hrtime.bigint();
     const [timingSnap, partnerSnap] = await Promise.all([
       timingRef.get(),
       partnerRef.get(),
     ]);
+    const readTime = Number(process.hrtime.bigint() - readStart) / 1_000_000;
+    console.log(`      [DB] Fetch timing & partner docs: ${readTime.toFixed(2)}ms`);
 
     const partnerNonWorkingSlots = partnerSnap.exists
       ? partnerSnap.data().nonWorkingSlots || []
@@ -55,12 +58,15 @@ export async function changeTimingOfPartners(
 
       bookings.push({ [bookingId]: listOfBookedSlots });
 
+      const updateStart = process.hrtime.bigint();
       await timingRef.update({
         available: [...availableSet].sort((a, b) => a - b),
         booked: [...bookedSet].sort((a, b) => a - b),
         nonWorkingSlots: data.nonWorkingSlots || partnerNonWorkingSlots,
         bookings,
       });
+      const updateTime = Number(process.hrtime.bigint() - updateStart) / 1_000_000;
+      console.log(`      [DB] Update timing document: ${updateTime.toFixed(2)}ms`);
 
       return {
         statusCode: 200,
@@ -79,6 +85,7 @@ export async function changeTimingOfPartners(
       if (!bookedSet.has(i)) availableSlots.push(i);
     }
 
+    const createStart = process.hrtime.bigint();
     await timingRef.set({
       available: availableSlots,
       booked: listOfBookedSlots,
@@ -87,6 +94,8 @@ export async function changeTimingOfPartners(
       leave: [],
       bookings: [{ [bookingId]: listOfBookedSlots }],
     });
+    const createTime = Number(process.hrtime.bigint() - createStart) / 1_000_000;
+    console.log(`      [DB] Create new timing document: ${createTime.toFixed(2)}ms`);
 
     return {
       statusCode: 200,
