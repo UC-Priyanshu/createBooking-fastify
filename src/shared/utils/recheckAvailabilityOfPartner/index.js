@@ -11,18 +11,27 @@ async function recheckAvailabilityOfPartner(
 
   const partnerMissedLeadReasonListOfMap = [];
 
-  for (const partner of prioritizedPartners) {
-    const timingRef = firestore
+  // 🚀 OPTIMIZATION: Batch all timing document reads in parallel
+  const timingPromises = prioritizedPartners.map((partner) =>
+    firestore
       .collection("partner")
       .doc(partner.id)
       .collection("timings")
-      .doc(dateId);
+      .doc(dateId)
+      .get()
+      .catch(() => null) // Return null on error instead of throwing
+  );
+  
+  const timingSnapshots = await Promise.all(timingPromises);
 
-    let snapshot;
-    try {
-      snapshot = await timingRef.get();
-    } catch {
-      continue; // skip partner on read failure
+  // Now iterate with pre-fetched data
+  for (let i = 0; i < prioritizedPartners.length; i++) {
+    const partner = prioritizedPartners[i];
+    const snapshot = timingSnapshots[i];
+    
+    // Skip if fetch failed
+    if (snapshot === null) {
+      continue;
     }
 
     // If timing doc does NOT exist → partner available

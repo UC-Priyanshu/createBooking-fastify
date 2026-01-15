@@ -56,6 +56,11 @@ async function createNewBooking(
 
     /* -------- ASSIGN PARTNER -------- */
     const assignPartnerStart = process.hrtime.bigint();
+    
+    // 🚀 OPTIMIZATION: Pre-fetch user document in parallel with partner assignment
+    const userRef = fastify.firebase.firestore.collection("users").doc(bookingData.clientid);
+    const userDocPromise = userRef.get();
+    
     const finalBookingStatus = await recheckAndAssignPartnerToBooking(
       fastify,
       slotMapAndStatus.slotMap,
@@ -71,15 +76,14 @@ async function createNewBooking(
       finalBookingStatus.statusCode === 200 &&
       finalBookingStatus.status === "Placed"
     ) {
-      // updateWallet(fastify, bookingData).catch(() => { });
       try {
         const walletUpdateStart = process.hrtime.bigint();
-        const userRef = fastify.firebase.firestore.collection("users").doc(bookingData.clientid);
-        const userDoc = await userRef.get();
+        // User doc was pre-fetched in parallel - just await it now
+        const userDoc = await userDocPromise;
         const userDocTime = Number(process.hrtime.bigint() - walletUpdateStart) / 1_000_000;
-        console.log(`  [DB] Fetch user document: ${userDocTime.toFixed(2)}ms`);
+        console.log(`  [DB] Fetch user document: ${userDocTime.toFixed(2)}ms (pre-fetched)`);
         
-        if (!userDoc.exists) return;
+        if (!userDoc.exists) return finalBookingStatus;
         const userData = userDoc.data();
         // await removeUsersFromAudience(PURCHASE_CANCELLED_AUDIENCE_ID, [userData]);
 
@@ -226,7 +230,7 @@ async function recheckAndAssignPartnerToBooking(
     return {
       statusCode: 200,
       status: "Placed",
-      message: "Booking successfully placed",
+      message: "Booking is successfully placed and assigned to a partner.",
       bookingId: bookingStatus.bookingId,
     };
   } catch (error) {
