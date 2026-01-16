@@ -27,6 +27,13 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
     const oldBookingDate = bookingData.bookingdateIsoString.substring(0, 10).replace(/-/g, "");
     const timingId = bookingDate.substring(0, 4) + bookingDate.substring(5, 7) + bookingDate.substring(8, 10);
 
+    fastify.log.info({ 
+        oldBookingDate, 
+        timingId, 
+        oldPartnerId: bookingData.assignedpartnerid,
+        newPartnerId: recheckPartnersAvailability.partner.id
+    }, "Starting reschedule process");
+
     const oldPartnerId = bookingData.assignedpartnerid;
     const newPartnerId = recheckPartnersAvailability.partner.id;
 
@@ -37,7 +44,9 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
 
     try {
         const transactionResult = await firestore.runTransaction(async (transaction) => {
-
+            // ============================================
+            // PHASE 1: ALL READS (Do all reads first)
+            // ============================================
             
             const oldPartnerRef = firestore.collection("partner").doc(bookingData.assignedpartnerid);
             const newPartnerRef = firestore.collection("partner").doc(newPartnerId);
@@ -49,11 +58,11 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
                 oldPartnerCreditDoc = await transaction.get(oldPartnerCreditInfoRef);
             }
             
-            // Read 2: New partner data
-            const newPartnerDoc = await transaction.get(newPartnerRef);
-            
-            // Read 3: Old partner data
-            const oldPartnerDoc = await transaction.get(oldPartnerRef);
+            // Read 2 & 3: Partner data in parallel
+            const [newPartnerDoc, oldPartnerDoc] = await Promise.all([
+                transaction.get(newPartnerRef),
+                transaction.get(oldPartnerRef)
+            ]);
             
             // Read 4: Timing documents
             const oldTimingRef = oldPartnerRef.collection("timings").doc(oldBookingDate);
@@ -61,9 +70,11 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
             
             let oldTimingSnap, newTimingSnap;
             if (oldPartnerRef.id === newPartnerRef.id && oldBookingDate === timingId) {
+                // Same partner, same date - read once
                 oldTimingSnap = await transaction.get(oldTimingRef);
-                newTimingSnap = oldTimingSnap; // Same doc
+                newTimingSnap = oldTimingSnap;
             } else {
+                // Different partner or date - read in parallel
                 [oldTimingSnap, newTimingSnap] = await Promise.all([
                     transaction.get(oldTimingRef),
                     transaction.get(newTimingRef)
@@ -85,7 +96,7 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
                 listOfBookedSlots.push(rescheduleData.rescheduleSlotNumber + i);
             }
             
-            // Prepare previous assigned data
+            // Prepare previous assigned data (matching Express logic)
             let previousAssigned = {};
             if (bookingData.assigned) {
                 previousAssigned = {
@@ -93,32 +104,47 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
                     name: bookingData.assigned.name,
                     rescheduleTime: Timestamp.now(), // Use Timestamp.now() instead of FieldValue.serverTimestamp() for arrays
                     rescheduleBy: rescheduleData.role || "admin",
-                    reason: rescheduleData.reason || "",
-                    ...(rescheduleData.role === "agent" && {
-                        agentId: rescheduleData.agentId || "",
-                        agentName: rescheduleData.agentName || ""
-                    })
+                    reason: rescheduleData.reason || ""
                 };
+                
+                if (rescheduleData.role === "agent") {
+                    previousAssigned.agentId = rescheduleData.agentId || "";
+                    previousAssigned.agentName = rescheduleData.agentName || "";
+                }
             }
             
-            // Update booking data with new partner info
-            Object.assign(bookingData, {
-                assigned: {
-                    hubId: newPartnerData.hubIds,
-                    id: newPartnerId,
-                    name: newPartnerData.name,
-                    phone: newPartnerData.phone,
-                    profileUrl: newPartnerData.profileUrl,
-                    rating: newPartnerData.avgrating?.toString() || "5",
-                },
-                assignedpartnerid: newPartnerId,
-                bookingdateIsoString: bookingDate,
-                listofbookedslots: listOfBookedSlots,
-                slotnumber: rescheduleData.rescheduleSlotNumber,
-                previousPartner: bookingData.previousPartner 
-                    ? [...bookingData.previousPartner, previousAssigned]
-                    : [previousAssigned],
-            });
+            // Update booking data with new partner info (matching Express logic exactly)
+            bookingData.assigned = {
+                hubId: newPartnerData.hubIds,
+                id: newPartnerId,
+                name: newPartnerData.name,
+                phone: newPartnerData.phone,
+                profileUrl: newPartnerData.profileUrl,
+                rating: newPartnerData.avgrating?.toString() || "5",
+            };
+            bookingData.assignedpartnerid = newPartnerId;
+            bookingData.bookingdate = new Date(bookingDate);
+            bookingData.listofbookedslots = listOfBookedSlots;
+            bookingData.rescheduledAt = FieldValue.serverTimestamp();
+            bookingData.bookingdateIsoString = new Date(bookingDate).toISOString();
+            bookingData.status = "pending";
+            bookingData.slotnumber = rescheduleData.rescheduleSlotNumber;
+            
+            // Reset incentiveCredits if it exists
+            if (bookingData.incentiveCredits !== undefined || bookingData.incentiveCredits !== null) {
+                bookingData.incentiveCredits = null;
+            }
+            
+            // Handle reschedule array (matching Express duplicate check logic)
+            if (bookingData.assigned) {
+                if (!bookingData.reschedule) {
+                    bookingData.reschedule = [previousAssigned];
+                } else if (bookingData.reschedule && !bookingData.reschedule.some((existingPartner) => existingPartner.id === previousAssigned.id)) {
+                    bookingData.reschedule.push(previousAssigned);
+                } else {
+                    bookingData.reschedule.push(previousAssigned);
+                }
+            }
             
             // ============================================
             // PHASE 3: ALL WRITES (After all reads)
@@ -151,15 +177,19 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
                 });
             }
             
-            // Write 3: Update booking in main BOOKINGS collection
+            // Write 3: Update booking in main BOOKINGS collection (matching Express fields exactly)
             const bookingRef = firestore.collection("BOOKINGS").doc(bookingData.orderId);
             transaction.update(bookingRef, {
                 assigned: bookingData.assigned,
                 assignedpartnerid: bookingData.assignedpartnerid,
+                bookingdate: bookingData.bookingdate,
                 bookingdateIsoString: bookingData.bookingdateIsoString,
                 listofbookedslots: bookingData.listofbookedslots,
+                rescheduledAt: bookingData.rescheduledAt,
+                status: bookingData.status,
                 slotnumber: bookingData.slotnumber,
-                previousPartner: bookingData.previousPartner,
+                incentiveCredits: bookingData.incentiveCredits,
+                reschedule: bookingData.reschedule
             });
             
             // Write 4: Update old partner timing (REVERT slots)
@@ -213,6 +243,12 @@ export async function processReschedulingBooking(fastify, recheckPartnersAvailab
             };
         });
 
+        fastify.log.info({ 
+            transactionResult,
+            bookingId: bookingData.orderId 
+        }, "Transaction completed successfully");
+
+        // Fire-and-forget async operations (non-blocking)
         if (transactionResult.isMissedLead) {
             initMissedLeadsFunction(
                 fastify,

@@ -128,15 +128,25 @@ async function recheckAndAssignPartnerToBooking(
       preferredPartner
     );
 
+    fastify.log.info({ 
+      prioritizedCount: prioritizedPartners.length,
+      firstPartnerId: prioritizedPartners[0]?.id
+    }, "Partners prioritized");
+
     if (
       rescheduleData?.status === true &&
       preferredPartner === "none"
     ) {
+      fastify.log.info("Re-prioritizing partners according to previous partner");
       prioritizedPartners = prioritizePartnersAccordingToPreviousPartner(
         prioritizedPartners,
         bookingData.previousPartner,
         bookingData.assigned
       );
+      fastify.log.info({ 
+        reprioritizedCount: prioritizedPartners.length,
+        firstPartnerId: prioritizedPartners[0]?.id
+      }, "Partners re-prioritized");
     }
 
     const recheckPartnersAvailability = await recheckAvailabilityOfPartner(
@@ -147,6 +157,12 @@ async function recheckAndAssignPartnerToBooking(
       bookingData,
       rescheduleData
     );
+
+    fastify.log.info({ 
+      availablityStatus: recheckPartnersAvailability.availablityStatus,
+      partnerId: recheckPartnersAvailability.partner?.id,
+      statusCode: recheckPartnersAvailability.statusCode
+    }, "Rechecked partner availability");
 
     if (recheckPartnersAvailability.statusCode === 400) {
       return recheckPartnersAvailability;
@@ -212,7 +228,12 @@ function prioritizePartnersAccordingToPreviousPartner(
     previousPartnerList.forEach((p, index) => indexMap.set(p.id, index));
 
     if (prioritizedPartners.length === previousPartnerList.length) {
-      const assignedIndex = previousPartnerList.findIndex((p) => p.id === assigned.id);
+      const assignedIndex = previousPartnerList.findIndex((p) => p.id === assigned?.id);
+      
+      // If assigned partner not found in previous list, return original order
+      if (assignedIndex === -1) {
+        return prioritizedPartners;
+      }
 
       const priorityPartners = prioritizedPartners.filter((p) => previousPartnerIds.has(p.id));
 
@@ -236,7 +257,7 @@ function prioritizePartnersAccordingToPreviousPartner(
     const notPrevious = [];
 
     for (const partner of sortedPrioritizedPartners) {
-      if (partner.id === assigned.id) {
+      if (assigned && partner.id === assigned.id) {
         removeAssigned.push(partner);
       } else if (previousPartnerIds.has(partner.id)) {
         previous.push(partner);
@@ -248,7 +269,7 @@ function prioritizePartnersAccordingToPreviousPartner(
     return [...notPrevious, ...previous, ...removeAssigned];
 
   } catch (error) {
-    console.error("Sorting error", error); 
+    // Return original order if sorting fails
     return prioritizedPartners;
   }
 }

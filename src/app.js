@@ -7,15 +7,26 @@ export async function buildApp(options = {}) {
 
     const app = Fastify({
         logger: {
-            level: process.env.NODE_ENV === 'production' ? 'warn' : 'info',
+            level: process.env.NODE_ENV === 'production' ? 'error' : 'info',
         },
         connectionTimeout: 30000,
         keepAliveTimeout: 30000,
-        requestIdLogLabel: 'reqId'    });
+        requestIdLogLabel: 'reqId'
+    });
 
     // Register plugins in order
     app.register(configPlugin);
     app.register(firebasePlugin);
+
+    // fastify.decorate('bookingService', {
+    //     createNewBooking,
+    // });
+
+    // const result = await fastify.bookingService.createNewBooking(
+    //     bookingData,
+    //     preferredPartner,
+    //     bookingDate
+    // );
 
     // Register routes
     app.register(createBookingRoutes);
